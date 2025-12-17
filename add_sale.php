@@ -1,472 +1,633 @@
 <?php
-session_start();
+// Database connection
+$host = 'localhost';
+$db = 'abc_company';
+$user = 'root';
+$pass = '';
 
-// Redirect to login page if not logged in
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'salesperson') {
-    header("Location: login.php");
-    exit();
-}
-
-// Include database connection
-include 'db_connection.php';
-
-// Check database connection
+$conn = new mysqli($host, $user, $pass, $db);
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Fetch user ID from session
-$user_id = $_SESSION['user_id'];
+// Function to convert number to words
+function numberToWords($number) {
+    $f = new NumberFormatter("en", NumberFormatter::SPELLOUT);
+    return ucfirst($f->format($number));
+}
 
-// Handle form submission
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Get general sale data
-    $sales_order_no = $_POST['sales_order_no'];
-    $sales_invoice_no = $_POST['sales_invoice_no'];
-    $reference = $_POST['reference'];
-    $date = $_POST['date'];
-    $customer_id = $_POST['customer_id'];
-    $customer_name = $_POST['customer_name'];
-    $payment_method = $_POST['payment_method'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Collect and sanitize form data
+    $formData = [
+        'sales_order_no' => $_POST['sales_order_no'] ?? '',
+        'sales_invoice_no' => $_POST['sales_invoice_no'] ?? '',
+        'invoice_date' => $_POST['invoice_date'] ?? '',
+        'customer_name' => $_POST['customer_name'] ?? '',
+        'customer_id' => $_POST['customer_id'] ?? '',
+        'salesperson_name' => $_POST['salesperson_name'] ?? '',
+        'salesperson_id' => $_POST['salesperson_id'] ?? '',
+        'payment_method' => $_POST['payment_method'] ?? '',
+        'total_sales_before_vat' => floatval($_POST['total_sales_before_vat'] ?? 0),
+        'vat' => floatval($_POST['vat'] ?? 0),
+        'total_sales_after_vat' => floatval($_POST['total_sales_after_vat'] ?? 0),
+        'amount_paid' => floatval($_POST['amount_paid'] ?? 0),
+        'amount_due' => floatval($_POST['amount_due'] ?? 0),
+        'reference' => $_POST['reference'] ?? ''
+    ];
 
-    // Loop through each item entry and insert into database
-    $item_ids = $_POST['item_id'];
-    $item_descriptions = $_POST['item_description'];
-    $gl_accounts = $_POST['gl_account'];
-    $quantities = $_POST['quantity'];
-    $unit_prices = $_POST['unit_price'];
-    $job_ids = $_POST['job_id'];
+    // Prepare item JSON data
+    $itemsData = [];
 
-    $total_sales_before_vat = 0;
-    $total_sales_with_vat = 0;
-    $vat_amount = 0;
-
-    foreach ($item_ids as $index => $item_id) {
-        $item_description = $item_descriptions[$index];
-        $gl_account = $gl_accounts[$index];
-        $quantity = $quantities[$index];
-        $unit_price = $unit_prices[$index];
-        $total_sales = $quantity * $unit_price;
-        $job_id = isset($job_ids[$index]) ? $job_ids[$index] : '';  // Allow empty job ID
-
-        // Calculate total sales before VAT
-        $total_sales_before_vat += $total_sales;
-
-        // Insert sale into database
-        $insert_sale_query = "INSERT INTO sales (salesperson_id, sales_order_no, invoice_no, reference, date, customer_id, customer_name, payment_method, item_id, item_description, gl_account, quantity, unit_price, total_sales, job_id) 
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        $stmt = $conn->prepare($insert_sale_query);
-        if (!$stmt) {
-            die("Prepare failed: " . $conn->error);
+    if (!empty($_POST['item_id']) && is_array($_POST['item_id'])) {
+        foreach ($_POST['item_id'] as $index => $itemId) {
+            if (!empty($itemId)) {
+                $itemsData[] = [
+                    'item_id' => $itemId,
+                    'item_description' => $_POST['item_description'][$index] ?? '',
+                    'category' => $_POST['category'][$index] ?? '',
+                    'uom' => $_POST['uom'][$index] ?? '',
+                    'product_id' => $_POST['product_id'][$index] ?? '',
+                    'quantity' => floatval($_POST['quantity'][$index] ?? 0),
+                    'GL_account' => $_POST['GL_account'][$index] ?? '',
+                    'unit_price' => floatval($_POST['unit_price'][$index] ?? 0),
+                ];
+            }
         }
-
-        $stmt->bind_param("issssssssdddsd", $user_id, $sales_order_no, $sales_invoice_no, $reference, $date, $customer_id, $customer_name, $payment_method, $item_id, $item_description, $gl_account, $quantity, $unit_price, $total_sales, $job_id);
-
-        if ($stmt->execute()) {
-            $success_message = "Sale added successfully!";
-        } else {
-            $error_message = "Error: " . $conn->error;
-        }
-
-        $stmt->close();
     }
 
-    // Calculate VAT (15%)
-    $vat_amount = $total_sales_before_vat * 0.15;
-    $total_sales_with_vat = $total_sales_before_vat + $vat_amount;
+    // Update inventory quantities
+    foreach ($itemsData as $item) {
+        $product_id = $item['item_id'];
+        $quantity = $item['quantity'];
+
+        $update = $conn->prepare("UPDATE inventory SET quantity = quantity - ? WHERE item_id = ?");
+        if (!$update) {
+            die("❌ Prepare failed (inventory update): " . $conn->error);
+        }
+        // Assuming item_id is a string; change 's' to 'i' if integer
+        $update->bind_param("ds", $quantity, $item_id);
+        $update->execute();
+        $update->close();
+    }
+
+    $itemsJson = !empty($itemsData) ? json_encode($itemsData) : json_encode([]);
+
+    // Prepare SQL insert
+    $sql = "INSERT INTO sales (
+        sales_order_no, salesperson_id, salesperson_name, reference,
+        invoice_no, items, total_sales_before_vat, vat,
+        total_sales_after_vat, amount_paid, amount_due, `date`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        die("❌ Prepare failed: " . $conn->error);
+    }
+
+    $stmt->bind_param(
+        "ssssssddddds",
+        $formData['sales_order_no'],
+        $formData['salesperson_id'],
+        $formData['salesperson_name'],
+        $formData['reference'],
+        $formData['sales_invoice_no'],
+        $itemsJson,
+        $formData['total_sales_before_vat'],
+        $formData['vat'],
+        $formData['total_sales_after_vat'],
+        $formData['amount_paid'],
+        $formData['amount_due'],
+        $formData['invoice_date']
+    );
+
+    if ($stmt->execute()) {
+        $totalFormatted = number_format($formData['total_sales_after_vat'], 2);
+        $inWords = numberToWords($formData['total_sales_after_vat']);
+
+        echo "<div style='
+                padding: 20px;
+                background: #d4edda;
+                color: #155724;
+                font-family: Arial, sans-serif;
+                border: 2px solid #c3e6cb;
+                border-radius: 10px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                max-width: 600px;
+                margin: 20px auto;
+                text-align: center;
+                font-size: 18px;
+            '>
+            <h2 style='margin-bottom: 10px;'>✅ Invoice Saved Successfully!</h2>
+            <p><strong>Total Amount:</strong> <span style='font-size: 20px;'>$totalFormatted</span></p>
+            <p><strong>In Words:</strong> <em>$inWords</em></p>
+        </div>";
+    } else {
+        echo "<div style='
+                padding: 15px;
+                background: #f8d7da;
+                color: #721c24;
+                border: 2px solid #f5c6cb;
+                border-radius: 10px;
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: 20px auto;
+                text-align: center;
+            '>❌ Error saving invoice: " . $stmt->error . "</div>";
+    }
+
+    $stmt->close();
+    $conn->close();
 }
 ?>
 
 
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f4f4f9;
-        }
-
-        .card {
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        .footer {
-            margin-top: 20px;
-            background-color: #343a40;
-            color: white;
-            padding: 10px;
-            text-align: center;
-        }
-
-        .form-label {
-            font-weight: bold;
-        }
-
-        .table-excel {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background-color: #fff;
-            border: 1px solid #ddd;
-        }
-
-        .table-excel th,
-        .table-excel td {
-            border: 1px solid #ddd;
-            padding: 10px;
-            text-align: left;
-            font-size: 14px;
-        }
-
-        .table-excel th {
-            background-color: #f4f4f9;
-            font-weight: bold;
-        }
-
-        .table-excel tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-
-        .table-excel tr:hover {
-            background-color: #f1f1f1;
-        }
-
-        .table-excel input[type="number"],
-        .table-excel input[type="text"] {
-            width: 80%;
-            padding: 5px;
-            font-size: 14px;
-        }
-
-        .btn-back {
-            margin-top: 20px;
-        }
-
-        .row-input {
-            margin-bottom: 15px;
-        }
-
-        .table-excel input {
-            width: 100%;
-        }
-
-        .summary-section {
-            background-color: #f8f9fa;
-            padding: 10px;
-            margin-top: 20px;
-            border-radius: 5px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        .summary-section h5 {
-            font-weight: bold;
-        }
-
-        .summary-section p {
-            font-size: 16px;
-        }
-    </style>
-</head>
-
-<body>
-    <div class="container my-4">
-        <h1 class="text-center">Sales Invoice</h1>
-
-        <!-- Display success or error message -->
-        <?php if (isset($success_message)): ?>
-            <div class="alert alert-success"><?php echo htmlspecialchars($success_message); ?></div>
-        <?php elseif (isset($error_message)): ?>
-            <div class="alert alert-danger"><?php echo htmlspecialchars($error_message); ?></div>
-        <?php endif; ?>
-
-        <!-- Sale Form -->
-        <div class="card p-4">
-            <form action="add_sale.php" method="POST" id="sales_form">
-                <!-- Sales General Information in One Row -->
-                <div class="row row-input">
-                    <div class="col-md-2">
-                        <label for="sales_order_no" class="form-label">Sales Order No.</label>
-                        <input type="text" class="form-control" id="sales_order_no" name="sales_order_no">
-                    </div>
-                    <div class="col-md-2">
-                        <label for="sales_invoice_no" class="form-label">Sales Invoice No.</label>
-                        <input type="text" class="form-control" id="sales_invoice_no" name="sales_invoice_no" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label for="reference" class="form-label">Reference</label>
-                        <input type="text" class="form-control" id="reference" name="reference" required>
-                    </div>
-              
-                <div class="col-md-2">
-                        <label for="date" class="form-label">Date</label>
-                        <input type="text" class="form-control" id="date" name="date" required>
-                    </div>
-                </div>
-                <!-- Customer Information in One Row -->
-                <div class="row row-input">
-                    <div class="col-md-2">
-                        <label for="customer_id" class="form-label">Customer ID</label>
-                        <input type="text" class="form-control" id="customer_id" name="customer_id" required>
-                    </div>
-                    <div class="col-md-4">
-                        <label for="customer_name" class="form-label">Customer Name</label>
-                        <input type="text" class="form-control" id="customer_name" name="customer_name" required>
-                    </div>
-                    <div class="col-md-2">
-                        <label for="payment_method" class="form-label">Payment Method</label>
-                        <select class="form-control" id="payment_method" name="payment_method" required>
-                            <option value="cash">Cash</option>
-                            <option value="bank">Bank Transfer</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Item Details Table (Excel-style) -->
-
-
-
-    <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sales Invoice</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script>
-        function calculateTotal(input) {
-            const row = input.closest("tr");
-            const quantity = parseFloat(row.querySelector('[name="quantity[]"]').value) || 0;
-            const unitPrice = parseFloat(row.querySelector('[name="unit_price[]"]').value) || 0;
-            const totalSales = quantity * unitPrice;
-            row.querySelector('[name="total_sales[]"]').value = totalSales.toFixed(2);
-            updateSalesSummary();
-        }
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>Sales Invoice</title>
+ <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+ <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+ <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+ <style>
+ .is-invalid {
+  border-color: #dc3545;
+ }
 
-        function addRow() {
-            const table = document.getElementById("item_table").getElementsByTagName("tbody")[0];
-            const newRow = table.insertRow();
+ .invalid-feedback {
+  color: #dc3545;
+  display: none;
+ }
 
-            newRow.innerHTML = `
-                <td><input type="text" class="form-control" name="item_id[]" required></td>
-                <td><input type="text" class="form-control" name="item_description[]" required></td>
-                <td><input type="text" class="form-control" name="gl_account[]" required></td>
-                <td><input type="number" class="form-control" name="quantity[]" step="1" min="1" oninput="calculateTotal(this)" required></td>
-                <td><input type="number" class="form-control" name="unit_price[]" step="0.01" min="0.01" oninput="calculateTotal(this)" required></td>
-                <td><input type="number" class="form-control" name="total_sales[]" readonly></td>
-                <td><input type="text" class="form-control" name="job_id[]"></td>
-                <td><button type="button" class="btn btn-danger" onclick="removeRow(this)">Remove</button></td>
-            `;
-        }
+ body {
+  background-color: #f4f4f9;
+ }
 
-        function removeRow(button) {
-            const row = button.closest("tr");
-            row.remove();
-            updateSalesSummary();
-        }
+ .container {
+  max-width: 800px;
+ }
 
-        function updateSalesSummary() {
-            let totalBeforeVAT = 0;
-            document.querySelectorAll('[name="total_sales[]"]').forEach(input => {
-                totalBeforeVAT += parseFloat(input.value) || 0;
-            });
+ .card {
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+ }
 
-            const vatAmount = totalBeforeVAT * 0.15;
-            const totalWithVAT = totalBeforeVAT + vatAmount;
+ .summary-section {
+  background: #f8f9fa;
+  padding: 10px;
+  text-align: right;
+  font-size: 1rem;
+  font-weight: bold;
+ }
 
-            document.getElementById("total_sales_before_vat").textContent = totalBeforeVAT.toFixed(2);
-            document.getElementById("vat_amount").textContent = vatAmount.toFixed(2);
-            document.getElementById("sales_with_vat").textContent = totalWithVAT.toFixed(2);
+ .amount-in-words {
+  font-style: italic;
+  color: #007bff;
+  font-weight: bold;
+ }
 
-            document.getElementById("amount_in_words").textContent = `Total in Words: ${toWords(totalWithVAT)} Birr only.`;
-        }
+ table th,
+ table td {
+  text-align: center;
+  vertical-align: middle;
+ }
 
-        function toWords(amount) {
-            const ones = [
-                "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
-                "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
-                "Seventeen", "Eighteen", "Nineteen",
-            ];
-            const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-            const scales = ["", "Thousand", "Million", "Billion"];
+ .signatures {
+  margin-top: 30px;
+  display: flex;
+  justify-content: space-between;
+ }
 
-            if (amount === 0) return "Zero";
+ .signatures div {
+  width: 45%;
+  border-top: 1px solid #000;
+  padding-top: 5px;
+  text-align: center;
+  font-weight: bold;
+ }
 
-            const words = [];
-            const numStr = Math.floor(amount).toString();
-            const numParts = numStr.match(/.{1,3}(?=(.{3})*$)/g).reverse();
+ .header img {
+  max-height: 50px;
+ }
 
-            numParts.forEach((part, index) => {
-                if (parseInt(part) === 0) return;
-
-                let str = "";
-                const hundreds = Math.floor(part / 100);
-                const remainder = part % 100;
-                if (hundreds > 0) str += ones[hundreds] + " Hundred ";
-                if (remainder < 20) str += ones[remainder];
-                else str += tens[Math.floor(remainder / 10)] + " " + ones[remainder % 10];
-
-                words.push(str + (scales[index] ? " " + scales[index] : ""));
-            });
-
-            return words.reverse().join(" ").trim();
-        }
-    </script>
+ .footer {
+  font-size: 14px;
+  font-weight: bold;
+  margin-top: 10px;
+  text-align: center;
+ }
+ </style>
 </head>
-<body>
-    <div class="container mt-5">
-        <h1 class="mb-4">Sales Invoice</h1>
 
-        <table id="item_table" class="table table-bordered">
-            <thead>
-                <tr>
-                    <th>Item ID</th>
-                    <th>Description</th>
-                    <th>GL Account</th>
-                    <th>Quantity</th>
-                    <th>Unit Price</th>
-                    <th>Total Sales</th>
-                    <th>Job ID</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Rows will be added dynamically -->
-            </tbody>
+<body>
+ <div></div>
+ </div>
+ <div class="header text-center">
+  <img src="assets/images/child drinking.jpeg" alt="Company Logo">
+  <h4>ABC Company PLC | Sales Invoice</h4>
+  <small>Bole, Addis Ababa | Tel: +251 912 345 678</small>
+ </div>
+
+ <div class="container mt-2">
+  <h2 class="mb-3 text-center">Sales Invoice</h2>
+  <!-- Invoice Header -->
+  <div class="invoice-header d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+   <div>
+
+    <!-- Action Buttons -->
+    <form id="sales_form" method="POST">
+     <div class="d-flex flex-wrap gap-2 mb-3">
+      <button type="button" class="btn btn-info text-white" onclick="window.location.href='sales_invoice_list.php'">📂
+       Show Sales</button>
+      <div></div>
+      <button type="reset" class="btn btn-danger" onclick="clearForm()">🗑️ Clear Data</button>
+      <button type="button" class="btn btn-secondary no-print" onclick="printFullInvoice()">🖨️ Print</button>
+      <button type="submit" name="save_invoice" class="btn btn-success">💾 Save Invoice</button>
+
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+      <button onclick="downloadPDF()" style=" margin-top: 10px; padding: 8px 16px; background: #007bff; color: white;
+       border: none; border-radius: 5px;">📄 Download PDF</button>
+      <script>
+      function downloadPDF() {
+       const {
+        jsPDF
+       } = window.jspdf;
+       const doc = new jsPDF();
+       doc.html(document.body, {
+        callback: function(doc) {
+         doc.save("invoice.pdf");
+        },
+        x: 10,
+        y: 10
+       });
+      }
+      </script>
+      <!-- close button -->
+      <button type="button" onclick="window.location.href='admin_dashboard.php'" class="btn btn-danger">Close</button>
+     </div>
+
+
+
+     <!-- Success/Error Messages -->
+
+     <div class="card">
+
+      <!-- Sales General Information -->
+      <div class="row">
+       <div class="col-md-3">
+        <label class="form-label">Order No.</label>
+        <input type="text"
+         class="form-control <?php echo (!empty($error) && empty($formData['sales_order_no']) ? 'is-invalid' : ''); ?>"
+         name="sales_order_no" placeholder="Enter order number"
+         value="<?php echo htmlspecialchars($formData['sales_order_no'] ?? ''); ?>" required>
+
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Invoice No.</label>
+        <input type="text"
+         class="form-control <?php echo (!empty($error) && empty($formData['sales_invoice_no']) ? 'is-invalid' : ''); ?>"
+         name="sales_invoice_no" placeholder="Enter invoice number"
+         value="<?php echo htmlspecialchars($formData['sales_invoice_no'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Reference</label>
+        <input type="text" class="form-control" name="reference" placeholder="Enter reference"
+         value="<?php echo htmlspecialchars($formData['reference'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Invoice Date</label>
+        <input type="date"
+         class="form-control <?php echo (!empty($error) && empty($formData['date']) ? 'is-invalid' : ''); ?>"
+         name="date" value="<?php echo htmlspecialchars($formData['date'] ?? ''); ?>" required>
+       </div>
+      </div>
+
+      <!-- Customer Information -->
+      <div class="row mt-3">
+       <div class="col-md-3">
+        <label class="form-label">Customer ID</label>
+        <input type="text"
+         class="form-control <?php echo (!empty($error) && empty($formData['customer_id']) ? 'is-invalid' : ''); ?>"
+         name="customer_id" placeholder="Enter customer ID"
+         value="<?php echo htmlspecialchars($formData['customer_id'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Customer Name</label>
+        <input type="text"
+         class="form-control <?php echo (!empty($error) && empty($formData['customer_name']) ? 'is-invalid' : ''); ?>"
+         name="customer_name" placeholder="Enter customer name"
+         value="<?php echo htmlspecialchars($formData['customer_name'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Branch ID</label>
+        <input type="text" class="form-control" name="branch_id" placeholder="Enter branch ID"
+         value="<?php echo htmlspecialchars($formData['branch_id'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Branch Name</label>
+        <input type="text" class="form-control" name="branch_name" placeholder="Enter branch name"
+         value="<?php echo htmlspecialchars($formData['branch_name'] ?? ''); ?>" required>
+       </div>
+      </div>
+
+      <!-- Salesperson & Payment Information -->
+      <div class="row mt-3">
+       <div class="col-md-3">
+        <label class="form-label">Salesperson ID</label>
+        <input type="text"
+         class="form-control <?php echo (!empty($error) && empty($formData['salesperson_id']) ? 'is-invalid' : ''); ?>"
+         name="salesperson_id" placeholder="Enter salesperson ID"
+         value="<?php echo htmlspecialchars($formData['salesperson_id'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Salesperson Name</label>
+        <input type="text"
+         class="form-control <?php echo (!empty($error) && empty($formData['salesperson_name']) ? 'is-invalid' : ''); ?>"
+         name="salesperson_name" placeholder="Enter salesperson name"
+         value="<?php echo htmlspecialchars($formData['salesperson_name'] ?? ''); ?>" required>
+       </div>
+
+       <div class="col-md-3">
+        <label class="form-label">Job ID</label>
+        <input type="text" class="form-control" name="job_id" placeholder="Enter job ID"
+         value="<?php echo htmlspecialchars($formData['job_id'] ?? ''); ?>" required>
+       </div>
+       <div class="col-md-3">
+        <label class="form-label">Payment Method</label>
+        <select
+         class="form-control <?php echo (!empty($error) && empty($formData['payment_method'] ?? '') ? 'is-invalid' : ''); ?>"
+         name="payment_method" required>
+         <option value="">Select Payment Method</option>
+         <option value="cash" <?php echo (($formData['payment_method'] ?? '') === 'cash') ? 'selected' : ''; ?>>Cash
+         </option>
+         <option value="cheque" <?php echo (($formData['payment_method'] ?? '') === 'cheque') ? 'selected' : ''; ?>>
+          Cheque</option>
+         <option value="bank" <?php echo (($formData['payment_method'] ?? '') === 'bank') ? 'selected' : ''; ?>>Bank
+          Transfer</option>
+         <option value="other" <?php echo (($formData['payment_method'] ?? '') === 'other') ? 'selected' : ''; ?>>Other
+         </option>
+        </select>
+       </div>
+      </div>
+
+      <!-- Items Purchased -->
+      <h6 class="mt-4">Items Purchased</h6>
+      <div id="alertSuccess" class="alert alert-success d-none">Inventory added successfully!</div>
+
+      <table class="table table-bordered table-sm" id="itemTable">
+       <thead class="table-light">
+        <tr>
+         <th>Item ID</th>
+         <th>Item_Description</th>
+         <th>Qty</th>
+         <th>Unit Price</th>
+         <th>Subtotal</th>
+         <th><button type="button" class="btn btn-sm btn-success" onclick="addRow()">Add Raw</button></th>
+        </tr>
+       </thead>
+       <tbody>
+        <tr>
+         <td><input type="text" name="item_id[]" class="form-control form-control-sm" required></td>
+         <td><input type="text" name="item_description[]" class="form-control form-control-sm" required></td>
+         <td><input type="number" name="qty[]" class="form-control form-control-sm qty" oninput="updateTotals()"
+           required>
+         </td>
+         <td><input type="number" name="unit_price[]" class="form-control form-control-sm unit-price"
+           oninput="updateTotals()" required></td>
+         <td><input type="text" name="total_sales_before_vat[]"
+           class="form-control form-control-sm total_sales_before_vat" readonly></td>
+         <td><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(this)">Remove Raw</button></td>
+        </tr>
+       </tbody>
+      </table>
+
+      <!-- Summary Section -->
+      <div class="row g-2 mt-2">
+       <div class="col-md-4 offset-md-8">
+        <table class="table table-borderless table-sm">
+         <tr>
+          <td class="text-end">total_sales_before_vat:</td>
+          <td>
+           <input type="text" id="total_sales_before_vat" name="total_sales_before_vat"
+            class="form-control form-control-sm text-end" readonly>
+          </td>
+         </tr>
+         <tr>
+          <td class="text-end">VAT (15%):</td>
+          <td>
+           <input type="text" id="vat" name="vat" class="form-control form-control-sm text-end" readonly>
+          </td>
+         </tr>
+         <tr>
+          <td class="text-end fw-bold">total_sales_after_vat:</td>
+          <td>
+           <input type="text" id="total_sales_after_vat" name="total_sales_after_vat"
+            class="form-control form-control-sm text-end fw-bold" readonly>
+          </td>
+         </tr>
         </table>
+        <label class="form-label">Amount in Words:</label>
+        <textarea id="amountInWords" class="form-control form-control-sm" rows="2" readonly></textarea>
+       </div>
+      </div>
 
-        <button type="button" class="btn btn-primary mb-4" onclick="addRow()">Add Item</button>
+      <!-- JavaScript Section -->
+      <script>
+      // Convert number to words including cents (Birr and Cents)
+      function convertToWords(amount) {
+       const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+        'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'
+       ];
+       const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
-        <div>
-            <p><strong>Total Before VAT:</strong> Birr<span id="total_sales_before_vat">0.00</span></p>
-            <p><strong>VAT (15%):</strong> Birr<span id="vat_amount">0.00</span></p>
-            <p><strong>Total Sales with VAT:</strong> Birr<span id="sales_with_vat">0.00</span></p>
-            <p id="amount_in_words"><strong>Total in Words:</strong> Zero Birr only.</p>
-        </div>
-    </div>
-    
-    <div class="text-center mt-4">
-                    <button type="submit" class="btn btn-primary">Save Sales</button>
-                </div>
-        
-</body>
-</html>
-kkkkkkkkkk
-<?php
-// Include necessary libraries for PDF and Excel exports
-require_once 'vendor/autoload.php';
-use Dompdf\Dompdf;
+       function numToWords(n) {
+        if (n === 0) return '';
+        if (n < 20) return ones[n];
+        if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+        if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' and ' + numToWords(n % 100) : '');
+        if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n %
+         1000) : '');
+        if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(
+         n % 1000000) : '');
+        if (n < 1000000000000) return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' +
+         numToWords(n % 1000000000) : '');
+        return 'Amount too large';
+       }
 
-require_once __DIR__ . '/vendor/autoload.php';
+       amount = parseFloat(amount);
+       if (isNaN(amount)) return 'Invalid amount';
 
-$dompdf = new Dompdf();
-$html = "<h1>Sales Report</h1><p>Details of sales go here...</p>";
-$dompdf->loadHtml($html);
-$dompdf->setPaper('A4', 'portrait');
-$dompdf->render();
-$dompdf->stream("sales_report.pdf", ["Attachment" => 1]);
+       const parts = amount.toFixed(2).split('.');
+       const birr = parseInt(parts[0]);
+       const cents = parseInt(parts[1]);
 
-// Company details
-$companyName = "ABC Company";
-$companyAddress = "Addis Ababa, Ethiopia";
+       let words = '';
+       if (birr > 0) words += numToWords(birr) + ' Birr';
+       if (cents > 0) words += (words ? ' and ' : '') + numToWords(cents) + ' Cents';
+       if (!words) words = 'Zero Birr';
 
-// Sample invoice data
-$invoiceItems = [
-    ['description' => 'Compact Car', 'quantity' => 2, 'unit_price' => 15000.00],
-    ['description' => 'Midsize Sedan', 'quantity' => 1, 'unit_price' => 25000.00],
-    ['description' => 'Luxury Car', 'quantity' => 1, 'unit_price' => 40000.00],
-];
+       return words.charAt(0).toUpperCase() + words.slice(1) + ' only';
+      }
 
-// Calculate totals
-$total = 0;
-foreach ($invoiceItems as &$item) {
-    $item['total_price'] = $item['quantity'] * $item['unit_price'];
-    $total += $item['total_price'];
-}
-unset($item);
+      // Format number to currency string with commas and 2 decimals
+      function formatCurrency(amount) {
+       return parseFloat(amount).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+       });
+      }
 
-// Format numbers
-function formatCurrency($amount) {
-    return number_format($amount, 2, '.', ',');
-}
+      // Update totals and amount in words
+      function updateTotal_sales_before_vat() {
+       let total = 0;
+       document.querySelectorAll('#itemTable tbody tr').forEach(row => {
+        const qty = parseFloat(row.querySelector('.qty').value) || 0;
+        const price = parseFloat(row.querySelector('.unit-price').value) || 0;
+        const total_sales_before_vat = qty * price;
+        row.querySelector('.total_sales_before_vat').value = formatCurrency(total_sales_before_vat);
+        total += subtotal;
+       });
 
-// Generate HTML content
-$htmlContent = "
-<html>
-<head>
-    <title>Invoice</title>
-    <style>
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .company-details { text-align: center; margin-bottom: 20px; }
-    </style>
-</head>
-<body>
-    <div class='company-details'>
-        <h2>$companyName</h2>
-        <p>$companyAddress</p>
-    </div>
-    <table>
-        <thead>
-            <tr>
-                <th>Description</th>
-                <th>Quantity</th>
-                <th>Unit Price</th>
-                <th>Total Price</th>
-            </tr>
-        </thead>
-        <tbody>";
+       const vat = total * 0.15;
+       const grandTotal = total + vat;
 
-foreach ($invoiceItems as $item) {
-    $htmlContent .= "
-            <tr>
-                <td>{$item['description']}</td>
-                <td>{$item['quantity']}</td>
-                <td>" . formatCurrency($item['unit_price']) . "</td>
-                <td>" . formatCurrency($item['total_price']) . "</td>
-            </tr>";
-}
+       document.getElementById("total_sales_before_vat").value = formatCurrency(total);
+       document.getElementById("vat").value = formatCurrency(vat);
+       document.getElementById("total_sales_after_vat").value = formatCurrency(grandTotal);
+       document.getElementById("amountInWords").value = convertToWords(grandTotal);
+      }
 
-$htmlContent .= "
-        </tbody>
-        <tfoot>
-            <tr>
-                <th colspan='3'>Grand Total</th>
-                <th>" . formatCurrency($total) . "</th>
-            </tr>
-        </tfoot>
-    </table>
-    <br>
-    <button onclick='window.print()'>Print</button>
-    <button onclick='exportToExcel()'>Export to Excel</button>
-    <button onclick='exportToPDF()'>Export to PDF</button>
+      // Add a new row to the items table
+      function addRow() {
+       const table = document.querySelector('#itemTable tbody');
+       const newRow = table.rows[0].cloneNode(true);
+       newRow.querySelectorAll('input').forEach(input => input.value = '');
+       table.appendChild(newRow);
+      }
 
-    <script>
-        function exportToExcel() {
-            let table = document.querySelector('table');
-            let downloadLink = document.createElement('a');
-            let dataType = 'application/vnd.ms-excel';
-            let tableHTML = table.outerHTML.replace(/ /g, '%20');
+      // Remove a row from the items table
+      function removeRow(button) {
+       const row = button.closest('tr');
+       const table = document.querySelector('#itemTable tbody');
+       if (table.rows.length > 1) row.remove();
+       updateTotals();
+      }
 
-            downloadLink.href = 'data:' + dataType + ', ' + tableHTML;
-            downloadLink.download = 'invoice.xls';
-            downloadLink.click();
-        }
+      // Clear form and reset totals
+      function clearForm() {
+       if (confirm("Clear all entered data?")) {
+        document.querySelector("form").reset();
+        const rows = document.querySelectorAll("#itemTable tbody tr");
+        rows.forEach((row, index) => index > 0 && row.remove());
+        updateTotals();
+       }
+      }
 
-        function exportToPDF() {
-            const doc = new jsPDF();
-            doc.text('$companyName', 10, 10);
-            doc.text('$companyAddress', 10, 20);
-            doc.autoTable({
-                html: 'table',
-                startY: 30
-            });
-            doc.save('invoice.pdf');
-        }
-    </script>
-</body>
-</html>";
 
-// Display the HTML content
-echo $htmlContent;
-?>
+      // Format currency with two decimals
+      function formatCurrency(amount) {
+       return parseFloat(amount).toFixed(2);
+      }
+
+      // Update totals and amount in words
+      function updateTotals() {
+       let total = 0;
+
+       document.querySelectorAll('#itemTable tbody tr').forEach(row => {
+        const qty = parseFloat(row.querySelector('.qty').value) || 0;
+        const price = parseFloat(row.querySelector('.unit-price').value) || 0;
+        const total_sales_before_vat = qty * price;
+        row.querySelector('.total_sales_before_vat').value = formatCurrency(total_sales_before_vat);
+        total += total_sales_before_vat;
+       });
+
+       const vat = total * 0.15;
+       const grandTotal = total + vat;
+
+       document.getElementById("total_sales_before_vat").value = formatCurrency(total);
+       document.getElementById("vat").value = formatCurrency(vat);
+       document.getElementById("total_sales_after_vat").value = formatCurrency(grandTotal);
+       document.getElementById("amountInWords").value = convertToWords(grandTotal);
+      }
+
+      // Add a new row to the items table
+      function addRow() {
+       const table = document.querySelector('#itemTable tbody');
+       const newRow = table.rows[0].cloneNode(true);
+       newRow.querySelectorAll('input').forEach(input => input.value = '');
+       table.appendChild(newRow);
+      }
+
+      // Remove a row from the items table
+      function removeRow(button) {
+       const row = button.closest('tr');
+       const table = document.querySelector('#itemTable tbody');
+       if (table.rows.length > 1) {
+        row.remove();
+        updateTotals();
+       }
+      }
+
+      // Clear form and reset totals
+      function clearForm() {
+       if (confirm("Clear all entered data?")) {
+        document.querySelector("form").reset();
+        const rows = document.querySelectorAll("#itemTable tbody tr");
+        rows.forEach((row, index) => {
+         if (index > 0) row.remove();
+        });
+        updateTotals();
+       }
+      }
+
+      // Print invoice hiding buttons
+      function printFullInvoice() {
+       const buttons = document.querySelectorAll('.no-print, button');
+       buttons.forEach(btn => btn.style.display = 'none');
+
+       window.print();
+
+       setTimeout(() => {
+        buttons.forEach(btn => btn.style.display = 'inline-block');
+       }, 1000);
+      }
+
+
+      // Print invoice hiding buttons
+      function printFullInvoice() {
+       const buttons = document.querySelectorAll('.no-print, button');
+       buttons.forEach(btn => btn.style.display = 'none');
+
+       window.print();
+
+       setTimeout(() => {
+        buttons.forEach(btn => btn.style.display = 'inline-block');
+       }, 1000);
+      }
+      </script>
+
+      <style>
+      @media print {
+
+       .no-print,
+       .no-print * {
+        display: none !important;
+       }
+      }
+      </style>
+      <!-- Signature Section -->
+      <div class="row mt-4">
+       <div class="col-md-6 text-center">
+        <p class="mt-4" style="border-bottom: 1px solid #000; width: 80%; margin: 0 auto;">&nbsp;</p>
+        <strong>Prepared By</strong>
+       </div>
+       <div class="col-md-6 text-center">
+        <p class="mt-4" style="border-bottom: 1px solid #000; width: 80%; margin: 0 auto;">&nbsp;</p>
+        <strong>Approved By</strong>
+       </div>
+      </div>

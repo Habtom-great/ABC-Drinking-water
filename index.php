@@ -83,7 +83,7 @@
 
 <section class="hero">
     <div class="hero-content">
-        <h1>Welcome to ABC Water Company</h1>
+        <h1>Welcome to ABC Drinking Water Company</h1>
         <p>Your trusted source for clean, safe, and refreshing drinking water.</p>
     </div>
    

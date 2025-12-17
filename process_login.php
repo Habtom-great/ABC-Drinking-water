@@ -1,4 +1,18 @@
 <?php
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $name = $_POST["name"];
+    $email = $_POST["email"];
+    $password = $_POST["password"];
+
+    // Dummy response (Replace this with actual database storage)
+    echo "Registration successful! Name: $name, Email: $email";
+}
+?>
+
+
+kkkkk
+
+<?php
 // Enable error reporting for debugging purposes
 ini_set('display_errors', 1);
 error_reporting(E_ALL);

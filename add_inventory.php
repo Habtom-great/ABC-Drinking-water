@@ -1,710 +1,838 @@
 <?php
-// Database connection
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "ABC_Company";
+include('db.php');
+session_start();
 
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Authentication check
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit();
 }
 
-// Fetch company information
-$company_name = "";
-$address = "";
-$sql = "SELECT company_name, address FROM company_info LIMIT 1";
-$result = $conn->query($sql);
-if ($result && $result->num_rows > 0) {
-    $row = $result->fetch_assoc();
-    $company_name = $row['company_name'];
-    $address = $row['address'];
-} else {
-    $company_name = "Default Company Name";
-    $address = "Default Address";
+// CSRF protection
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // Sanitize and retrieve basic invoice fields
+    $purchase_order_no = $_POST['purchase_order_no'] ?? '';
+    $purchase_invoice_no = $_POST['purchase_invoice_no'] ?? '';
+    $reference = $_POST['reference'] ?? '';
+    $invoice_date = $_POST['invoice_date'] ?? '';
+
+    $vendor_id = $_POST['vendor_id'] ?? '';
+    $vendor_company_name = $_POST['vendor_company_name'] ?? '';
+    $vendor_name = $_POST['vendor_name'] ?? '';
+    $vendor_tin_no = $_POST['vendor_tin_no'] ?? '';
+    $vendor_phone = $_POST['vendor_phone'] ?? '';
+
+    $purchase_person_id = $_POST['purchase_person_id'] ?? '';
+    $purchase_person_name = $_POST['purchase_person_name'] ?? '';
+    $payment_method = $_POST['payment_method'] ?? '';
+
+    $item_ids = $_POST['item_id'] ?? [];
+    $descriptions = $_POST['description'] ?? [];
+    $qtys = $_POST['qty'] ?? [];
+    $unit_prices = $_POST['unit_price'] ?? [];
+
+    $stmt = $conn->prepare("INSERT INTO inventory (
+        purchase_order_no, purchase_invoice_no, reference, invoice_date,
+        vendor_id, vendor_company_name, vendor_name, vendor_tin_no, vendor_phone,
+        purchase_person_id, purchase_person_name, payment_method,
+        item_id, item_description, quantity, unit_price, 
+        total_purchased_before_vat, vat, total_purchased_after_vat
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+    $vat_rate = 0.15; // 15% VAT
+
+    for ($i = 0; $i < count($item_ids); $i++) {
+        $item_id = $item_ids[$i];
+        $desc = $descriptions[$i];
+        $qty = (float)$qtys[$i];
+        $unit_price = (float)$unit_prices[$i];
+        $total_before_vat = $qty * $unit_price;
+        $vat = $total_before_vat * $vat_rate;
+        $total_after_vat = $total_before_vat + $vat;
+
+        $stmt->bind_param(
+            "ssssssssssssiddidd",
+            $purchase_order_no,
+            $purchase_invoice_no,
+            $reference,
+            $invoice_date,
+            $vendor_id,
+            $vendor_company_name,
+            $vendor_name,
+            $vendor_tin_no,
+            $vendor_phone,
+            $purchase_person_id,
+            $purchase_person_name,
+            $payment_method,
+            $item_id,
+            $desc,
+            $qty,
+            $unit_price,
+            $total_before_vat,
+            $vat,
+            $total_after_vat
+        );
+
+        $stmt->execute();
+    }
+
+    echo "<script>document.getElementById('alertSuccess').classList.remove('d-none');</script>";
 }
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Purchase Invoice</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f5f5f5;
-            color: #333;
-        }
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>Purchase Invoice Entry</title>
+ <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+ <style>
+ body {
+  background-color: #f0f2f5;
+ }
 
-        header {
-            background-color: #4CAF50;
-            color: white;
-            padding: 20px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: bold;
-        }
+ @media print {
+  .no-print {
+   display: none !important;
+  }
+ }
 
-        .company-info {
-            text-align: center;
-            margin: 10px 0;
-            font-size: 16px;
-            font-weight: bold;
-        }
+ .invoice-container {
+  background: #fff;
+  padding: 25px;
+  border-radius: 10px;
+  max-width: 950px;
+  width: 100%;
+ }
 
-        main {
-            padding: 20px;
-        }
+ .invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #ccc;
+  padding-bottom: 15px;
+  margin-bottom: 25px;
+ }
 
-        .invoice-container {
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            padding: 20px;
-        }
+ .invoice-logo {
+  height: 60px;
+  width: auto;
+ }
 
-        form {
-            display: grid;
-            grid-template-rows: repeat(3, auto);
-            row-gap: 20px;
-        }
+ .form-control,
+ .form-select {
+  font-size: 13px;
+  padding: 6px 10px;
+ }
 
-        .form-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
+ button[type="submit"] {
+  padding: 8px 20px;
+  font-size: 14px;
+ }
 
-        .form-row > div {
-            flex: 1 1 calc(25% - 15px);
-            min-width: 200px;
-        }
-
-        form label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-
-        form input,
-        form select,
-        form button {
-            width: 50%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-
-        form button {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            width: 10%;
-        }
-
-        form button:hover {
-            background-color: #45a049;
-        }
-
-        footer {
-            background-color: #4CAF50;
-            color: white;
-            text-align: center;
-            padding: 10px;
-            position: relative;
-            bottom: 0;
-            width: 60%;
-        }
-
-        @media (max-width: 768px) {
-            .form-row > div {
-                flex: 1 1 100%;
-            }
-        }
-    </style>
+ .table td input {
+  width: 100%;
+  font-size: 13px;
+ }
+ </style>
 </head>
+
 <body>
-    <header>
-        Purchase Invoice
-    </header>
-    <div class="company-info">
-        <p><?php echo htmlspecialchars($company_name); ?></p>
-        <p><?php echo htmlspecialchars($address); ?></p>
-    </div>
-    <main>
-        <div class="invoice-container">
-            <form action="process_invoice.php" method="POST">
-                <!-- Row 1 -->
-                <div class="form-row">
-                    <div>
-                        <label for="supplier_id">Supplier ID:</label>
-                        <input type="text" id="supplier_id" name="supplier_id" placeholder="Enter supplier ID" required>
-                    </div>
-                    <div>
-                        <label for="supplier_name">Supplier Name:</label>
-                        <input type="text" id="supplier_name" name="supplier_name" placeholder="Enter supplier name" required>
-                    </div>
-                    <div>
-                        <label for="invoice_no">Invoice No.:</label>
-                        <input type="text" id="invoice_no" name="invoice_no" placeholder="Enter invoice number" required>
-                    </div>
-                    <div>
-                        <label for="reference">Reference:</label>
-                        <input type="text" id="reference" name="reference" placeholder="Enter reference" required>
-                    </div>
-                </div>
-
-                <!-- Row 2 -->
-                <div class="form-row">
-                    
-                    <div>
-                        
-                        <label for="item_name">Item Name:</label>
-                        <input type="text" id="item_name" name="item_name" placeholder="Enter item name" required>
-                    </div>
-                    
-                    <div>
-                        <label for="uom">Unit of Measure (UOM):</label>
-                        <input type="text" id="uom" name="uom" placeholder="Enter UOM (e.g., kg, pcs)" required>
-                    </div>
-                    <div>
-                        <label for="quantity">Quantity:</label>
-                        <input type="number" id="quantity" name="quantity" placeholder="Enter quantity" required>
-                    </div>
-                    <div>
-                        <label for="unit_cost">Unit Cost:</label>
-                        <input type="number" step="0.01" id="unit_cost" name="unit_cost" placeholder="Enter unit cost" required>
-                    </div>
-                </div>
-
-                <!-- Row 3 -->
-                <div class="form-row">
-                    <div>
-                        <label for="total_cost">Total Cost:</label>
-                        <input type="number" step="0.01" id="total_cost" name="total_cost" placeholder="Total cost (calculated)" readonly>
-                    </div>
-                    <div>
-                        <label for="vat">VAT:</label>
-                        <input type="number" step="0.01" id="vat" name="vat" placeholder="Enter VAT" required>
-                    </div>
-                    <div>
-                        <label for="withholding">Withholding:</label>
-                        <input type="number" step="0.01" id="withholding" name="withholding" placeholder="Enter withholding" required>
-                    </div>
-                    <div>
-                        <label for="branch">Branch:</label>
-                        <select id="branch" name="branch" required>
-                            <option value="" disabled selected>Select branch</option>
-                            <option value="Branch1">Branch 1</option>
-                            <option value="Branch2">Branch 2</option>
-                            <option value="Branch3">Branch 3</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Account ID and Submit Button -->
-                <div class="form-row">
-                    <div style="flex: 1 1 50%;">
-                        <label for="account_id">Account ID:</label>
-                        <input type="text" id="account_id" name="account_id" placeholder="Enter account ID" required>
-                    </div>
-                    <div style="flex: 1 1 50%;">
-                        <button type="submit">Save Invoice</button>
-                    </div>
-                </div>
-                
-            </form>
-        </div>
-        <!-- Row 2 -->
-<div class="form-row">
+ <div class="d-flex justify-content-center align-items-center min-vh-100 py-4">
+  <div class="invoice-container shadow-sm">
+   <!-- Invoice Header -->
+   <div class="invoice-header d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
     <div>
-        <label for="item_id">Item ID:</label>
-        <input type="text" id="item_id" name="item_id" placeholder="Enter item ID" required>
+     <h4 class="mb-0">ABC Company</h4>
+     <small>Bole, Addis Ababa | Tel: +251 912 345 678</small>
     </div>
-    <div>
-        <label for="item_name">Item Name:</label>
-        <input type="text" id="item_name" name="item_name" placeholder="Enter item name" required>
-    </div>
-    <div>
-        <label for="uom">Unit of Measure (UOM):</label>
-        <input type="text" id="uom" name="uom" placeholder="Enter UOM (e.g., kg, pcs)" required>
-    </div>
-    <div>
-        <label for="quantity">Quantity:</label>
-        <input type="number" id="quantity" name="quantity" placeholder="Enter quantity" required>
-    </div>
-</div>
+    <img src="assets/images/child drinking.jpeg" alt="Company Logo" class="invoice-logo" style="height: 60px;">
+   </div>
 
-    </main>
-    
-    <footer>
-        &copy; 2025 Inventory Management System
-    </footer>
-</body>
-</html>
-kkkkkkkkkkkkkk
-<?php
-// Database connection
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "ABC_Company";
+   <!-- Display success/error messages -->
+   <?php if (isset($_SESSION['success'])): ?>
+   <div class="alert alert-success"><?= $_SESSION['success']; unset($_SESSION['success']); ?></div>
+   <?php endif; ?>
+   <?php if (isset($_SESSION['error'])): ?>
+   <div class="alert alert-danger"><?= $_SESSION['error']; unset($_SESSION['error']); ?></div>
+   <?php endif; ?>
 
-$conn = new mysqli($servername, $username, $password, $dbname);
+   <!-- Action Buttons -->
+   <div class="d-flex flex-wrap gap-2 mb-3">
+    <button type="button" class="btn btn-info text-white" onclick="showInvoiceLists()">📂 Show Invoice Lists</button>
+    <button type="reset" class="btn btn-danger" onclick="clearForm()">🗑️ Clear Data</button>
+    <button type="button" class="btn btn-secondary no-print" onclick="printFullInvoice()">🖨️ Print</button>
+    <button type="button" onclick="window.location.href='manage_inventory.php'" class="btn btn-danger">Close</button>
+    <button type="submit" name="save_invoice" class="btn btn-success">💾 Save Invoice</button>
+   </div>
 
-// Generate invoice number
-$invoice_number = "INV-" . date('Ymd') . "-" . str_pad(mt_rand(1,999), 3, '0', STR_PAD_LEFT);
+   <!-- Invoice Form Container -->
+   <div id="invoice-form" class="invoice-container">
+    <!-- Form Start -->
+    <form method="POST" enctype="multipart/form-data">
+     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token']; ?>">
 
-// Fetch necessary data from database
-$suppliers = $conn->query("SELECT id, name, address FROM suppliers");
-$branches = $conn->query("SELECT id, branch_name FROM branches");
-$items = $conn->query("SELECT item_id, item_name, uom, unit_cost FROM items");
-$accounts = $conn->query("SELECT account_code, account_name FROM chart_of_accounts");
-?>
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Advanced Purchase Invoice</title>
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
-    <style>
-        .invoice-box {
-            max-width: 1000px;
-            margin: auto;
-            padding: 30px;
-            border: 1px solid #eee;
-            font-size: 16px;
-            line-height: 24px;
-            font-family: 'Helvetica Neue', 'Helvetica', Arial, sans-serif;
-            color: #555;
-        }
-        .table-item td { padding: 3px !important; vertical-align: middle !important; }
-        .autocomplete { position: relative; display: inline-block; }
-        .autocomplete-items { position: absolute; z-index: 99; }
-        .signature-box { border: 1px solid #ccc; height: 80px; margin-top: 20px; }
-    </style>
-</head>
-<body>
-<div class="invoice-box">
-    <form action="save_invoice.php" method="post" id="invoiceForm">
-    
-    <!-- Header Section -->
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <h2>PURCHASE INVOICE</h2>
-            <div class="form-group">
-                <label>Supplier:</label>
-                <select class="form-control" name="supplier_id" id="supplierSelect" required>
-                    <option value="">Select Supplier</option>
-                    <?php while($row = $suppliers->fetch_assoc()): ?>
-                    <option value="<?= $row['id'] ?>"><?= $row['name'] ?></option>
-                    <?php endwhile; ?>
-                </select>
-            </div>
-            <div id="supplierInfo"></div>
-        </div>
-        
-        <div class="col-md-6 text-right">
-            <div class="form-group">
-                <label>Invoice Number:</label>
-                <input type="text" name="invoice_no" class="form-control" value="<?= $invoice_number ?>" readonly>
-            </div>
-            <div class="form-group">
-                <label>Date:</label>
-                <input type="date" name="invoice_date" class="form-control" value="<?= date('Y-m-d') ?>" required>
-            </div>
-        </div>
-    </div>
+     <!-- Basic Information -->
+     <div class="row g-2 mb-2">
+      <div class="col-md-3"><input type="text" name="purchase_order_no" class="form-control" placeholder="Order No"
+        required></div>
+      <div class="col-md-3"><input type="text" name="purchase_invoice_no" class="form-control" placeholder="Invoice No"
+        required></div>
+      <div class="col-md-3"><input type="text" name="reference" class="form-control" placeholder="Reference" required>
+      </div>
+      <div class="col-md-3"><input type="date" name="invoice_date" class="form-control" required></div>
+     </div>
 
-    <!-- Transaction Details -->
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="form-group">
-                <label>Branch:</label>
-                <select class="form-control" name="branch_id" required>
-                    <?php while($row = $branches->fetch_assoc()): ?>
-                    <option value="<?= $row['id'] ?>"><?= $row['branch_name'] ?></option>
-                    <?php endwhile; ?>
-                </select>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="form-group">
-                <label>Cash Account:</label>
-                <select class="form-control" name="cash_account" required>
-                    <?php while($row = $accounts->fetch_assoc()): ?>
-                    <option value="<?= $row['account_code'] ?>"><?= $row['account_name'] ?></option>
-                    <?php endwhile; ?>
-                </select>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="form-group">
-                <label>Reference:</label>
-                <input type="text" name="reference" class="form-control">
-            </div>
-        </div>
-    </div>
+     <div class="row g-2 mb-2">
+      <div class="col-md-3"><input type="text" name="vendor_id" class="form-control" placeholder="Vendor ID" required>
+      </div>
+      <div class="col-md-3"><input type="text" name="vendor_company_name" class="form-control"
+        placeholder="Company Name" required></div>
+      <div class="col-md-3"><input type="text" name="vendor_name" class="form-control" placeholder="Vendor Name"
+        required></div>
+      <div class="col-md-3"><input type="text" name="vendor_tin_no" class="form-control" placeholder="TIN No" required>
+      </div>
+     </div>
 
-    <!-- Items Table -->
-    <table class="table table-bordered" id="itemsTable">
-        <thead>
-            <tr>
-                <th>Item ID</th>
-                <th>Description</th>
-                <th>UOM</th>
-                <th>Quantity</th>
-                <th>Unit Cost</th>
-                <th>Total Cost</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr class="item-row">
-                <td>
-                    <select class="form-control item-select" name="item_id[]">
-                        <option value="">Select Item</option>
-                        <?php while($row = $items->fetch_assoc()): ?>
-                        <option value="<?= $row['item_id'] ?>" 
-                            data-uom="<?= $row['uom'] ?>" 
-                            data-unitcost="<?= $row['unit_cost'] ?>">
-                            <?= $row['item_name'] ?>
-                        </option>
-                        <?php endwhile; ?>
-                    </select>
-                </td>
-                <td><input type="text" name="description[]" class="form-control"></td>
-                <td><input type="text" name="uom[]" class="form-control uom" readonly></td>
-                <td><input type="number" name="quantity[]" class="form-control qty" step="0.01"></td>
-                <td><input type="number" name="unit_cost[]" class="form-control unit-cost" step="0.01"></td>
-                <td><input type="number" name="total_cost[]" class="form-control total-cost" readonly></td>
-                <td><button type="button" class="btn btn-danger remove-row">×</button></td>
-            </tr>
-        </tbody>
-    </table>
-    <button type="button" class="btn btn-primary" id="addRow">Add Item</button>
+     <div class="row g-2 mb-2">
+      <div class="col-md-3"><input type="text" name="vendor_phone" class="form-control" placeholder="Phone" required>
+      </div>
+      <div class="col-md-3"><input type="text" name="purchase_person_id" class="form-control" placeholder="Purchaser ID"
+        required></div>
+      <div class="col-md-3"><input type="text" name="purchase_person_name" class="form-control"
+        placeholder="Purchaser Name" required></div>
+      <div class="col-md-3">
+       <select class="form-select" name="payment_method" required>
+        <option value="">Payment Method</option>
+        <option value="Cash">Cash</option>
+        <option value="Cheque">Cheque</option>
+        <option value="Bank Transfer">Bank Transfer</option>
+       </select>
+      </div>
+     </div>
 
-    <!-- Totals Section -->
-    <div class="row mt-4">
-        <div class="col-md-4 offset-md-8">
-            <table class="table">
-                <tr>
-                    <th>Subtotal:</th>
-                    <td><input type="number" name="subtotal" id="subtotal" class="form-control" readonly></td>
-                </tr>
-                <tr>
-                    <th>Tax (%):</th>
-                    <td><input type="number" name="tax_rate" id="taxRate" class="form-control" value="15" step="0.01"></td>
-                </tr>
-                <tr>
-                    <th>Tax Amount:</th>
-                    <td><input type="number" name="tax_amount" id="taxAmount" class="form-control" readonly></td>
-                </tr>
-                <tr>
-                    <th>Grand Total:</th>
-                    <td><input type="number" name="grand_total" id="grandTotal" class="form-control" readonly></td>
-                </tr>
-            </table>
-        </div>
-    </div>
+     <!-- Items Purchased -->
+     <h6 class="mt-4">Items Purchased</h6>
+     <table class="table table-bordered table-sm" id="itemTable">
+      <thead class="table-light">
+       <tr>
+        <th>Item ID</th>
+        <th>Description</th>
+        <th>Qty</th>
+        <th>Unit Price</th>
+        <th>Subtotal</th>
+        <th><button type="button" class="btn btn-sm btn-success" onclick="addRow()">+</button></th>
+       </tr>
+      </thead>
+      <tbody>
+       <tr>
+        <td><input type="text" name="item_id[]" class="form-control form-control-sm" required></td>
+        <td><input type="text" name="description[]" class="form-control form-control-sm" required></td>
+        <td><input type="number" name="qty[]" class="form-control form-control-sm qty" oninput="updateTotals()"
+          required></td>
+        <td><input type="number" name="unit_price[]" class="form-control form-control-sm unit-price"
+          oninput="updateTotals()" required></td>
+        <td><input type="text" name="subtotal[]" class="form-control form-control-sm subtotal" readonly></td>
+        <td><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(this)">-</button></td>
+       </tr>
+      </tbody>
+     </table>
 
-    <!-- Approval Section -->
-    <div class="row mt-4">
-        <div class="col-md-4">
-            <div class="form-group">
-                <label>Prepared By:</label>
-                <input type="text" name="prepared_by" class="form-control" required>
-                <div class="signature-box"></div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="form-group">
-                <label>Checked By:</label>
-                <input type="text" name="checked_by" class="form-control" required>
-                <div class="signature-box"></div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="form-group">
-                <label>Approved By:</label>
-                <input type="text" name="approved_by" class="form-control" required>
-                <div class="signature-box"></div>
-            </div>
-        </div>
-    </div>
+     <!-- Summary Section -->
+     <div class="row g-2 mt-2">
+      <div class="col-md-4 offset-md-8">
+       <table class="table table-borderless table-sm">
+        <tr>
+         <td class="text-end">Total:</td>
+         <td><input type="text" id="total" name="total" class="form-control form-control-sm text-end" readonly></td>
+        </tr>
+        <tr>
+         <td class="text-end">VAT (15%):</td>
+         <td><input type="text" id="vat" name="vat" class="form-control form-control-sm text-end" readonly></td>
+        </tr>
+        <tr>
+         <td class="text-end fw-bold">Grand Total:</td>
+         <td><input type="text" id="grandTotal" name="grand_total" class="form-control form-control-sm text-end fw-bold"
+           readonly></td>
+        </tr>
+       </table>
+       <label class="form-label">Amount in Words:</label>
+       <textarea id="amountInWords" class="form-control form-control-sm" rows="2" readonly></textarea>
+      </div>
+     </div>
 
-    <div class="text-center mt-4">
-        <button type="submit" class="btn btn-lg btn-success">Save Invoice</button>
-        <button type="button" class="btn btn-lg btn-primary" onclick="window.print()">Print</button>
-    </div>
 
     </form>
-</div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script>
-$(document).ready(function() {
-    // Add new item row
-    $('#addRow').click(function() {
-        const newRow = $('.item-row:first').clone();
-        newRow.find('input').val('');
-        newRow.find('.total-cost').val('0.00');
-        $('#itemsTable tbody').append(newRow);
-    });
+    <!-- Signature Section -->
+    <div class="row mt-4">
+     <div class="col-md-6 text-center">
+      <p class="mt-1"><u>___________________________</u><br><strong>Prepared By</strong></p>
+     </div>
+     <div class="col-md-6 text-center">
+      <p class="mt-1"><u>___________________________</u><br><strong>Approved By</strong></p>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
 
-    // Remove item row
-    $(document).on('click', '.remove-row', function() {
-        if($('.item-row').length > 1) {
-            $(this).closest('tr').remove();
-            calculateTotals();
-        }
-    });
+ <script>
+ function updateTotals() {
+  let rows = document.querySelectorAll('#itemTable tbody tr');
+  let total = 0;
 
-    // Item selection handler
-    $(document).on('change', '.item-select', function() {
-        const row = $(this).closest('tr');
-        const selectedOption = $(this).find('option:selected');
-        row.find('.uom').val(selectedOption.data('uom'));
-        row.find('.unit-cost').val(selectedOption.data('unitcost'));
-        calculateRowTotal(row);
-    });
+  rows.forEach(row => {
+   const qty = parseFloat(row.querySelector('[name="qty[]"]').value) || 0;
+   const price = parseFloat(row.querySelector('[name="unit_price[]"]').value) || 0;
+   const subtotal = qty * price;
+   row.querySelector('[name="subtotal[]"]').value = subtotal.toFixed(2);
+   total += subtotal;
+  });
 
-    // Quantity/unit cost change handler
-    $(document).on('input', '.qty, .unit-cost', function() {
-        calculateRowTotal($(this).closest('tr'));
-    });
+  const vat = total * 0.15;
+  const grandTotal = total + vat;
 
-    function calculateRowTotal(row) {
-        const qty = parseFloat(row.find('.qty').val()) || 0;
-        const unitCost = parseFloat(row.find('.unit-cost').val()) || 0;
-        const total = qty * unitCost;
-        row.find('.total-cost').val(total.toFixed(2));
-        calculateTotals();
-    }
+  document.getElementById('total').value = total.toFixed(2);
+  document.getElementById('vat').value = vat.toFixed(2);
+  document.getElementById('grandTotal').value = grandTotal.toFixed(2);
+  document.getElementById('amountInWords').value = convertToWords(grandTotal);
+ }
 
-    function calculateTotals() {
-        let subtotal = 0;
-        $('.total-cost').each(function() {
-            subtotal += parseFloat($(this).val()) || 0;
-        });
-        
-        const taxRate = parseFloat($('#taxRate').val()) || 0;
-        const taxAmount = subtotal * (taxRate / 100);
-        const grandTotal = subtotal + taxAmount;
+ function addRow() {
+  const table = document.querySelector('#itemTable tbody');
+  const newRow = table.rows[0].cloneNode(true);
+  newRow.querySelectorAll('input').forEach(input => input.value = '');
+  table.appendChild(newRow);
+ }
 
-        $('#subtotal').val(subtotal.toFixed(2));
-        $('#taxAmount').val(taxAmount.toFixed(2));
-        $('#grandTotal').val(grandTotal.toFixed(2));
-    }
-});
-</script>
+ function removeRow(btn) {
+  const row = btn.closest('tr');
+  const table = document.querySelector('#itemTable tbody');
+  if (table.rows.length > 1) row.remove();
+  updateTotals();
+ }
+
+ function clearForm() {
+  if (confirm("Clear all entered data?")) {
+   document.querySelector("form").reset();
+   const rows = document.querySelectorAll("#itemTable tbody tr");
+   rows.forEach((row, index) => index > 0 && row.remove());
+   updateTotals();
+  }
+ }
+
+ function printFullInvoice() {
+  window.print();
+ }
+
+ function showInvoiceLists() {
+  window.location.href = "invoice_lists.php";
+ }
+
+ function convertToWords(amount) {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+   'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'
+  ];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  function numToWords(n) {
+   if (n === 0) return '';
+   if (n < 20) return ones[n];
+   if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+   if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' and ' + numToWords(n % 100) : '');
+   if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n % 1000) :
+    '');
+   if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(n %
+    1000000) : '');
+   if (n < 1000000000000) return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' +
+    numToWords(n % 1000000000) : '');
+   return 'Amount too large'; // Above a trillion
+  }
+
+  amount = parseFloat(amount);
+  if (isNaN(amount)) return 'Invalid amount';
+
+  const parts = amount.toFixed(2).split('.');
+  const birr = parseInt(parts[0]);
+  const cents = parseInt(parts[1]);
+
+  let words = '';
+  if (birr > 0) words += numToWords(birr) + ' Birr';
+  if (cents > 0) words += ' and ' + numToWords(cents) + ' Cents';
+  if (words === '') words = 'Zero Birr';
+
+  return words.charAt(0).toUpperCase() + words.slice(1) + ' only';
+ }
+ </script>
 </body>
+
 </html>
-kkkkk
+kkkkkk
 
 <?php
-// Database connection
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "ABC_Company";
+include('db.php');
+session_start();
 
-try {
-    // Create connection
-    $conn = new mysqli($servername, $username, $password, $dbname);
-    
-    // Check connection
-    if ($conn->connect_error) {
-        throw new Exception("Connection failed: " . $conn->connect_error);
-    }
-    
-    // Generate invoice number
-    $invoice_number = "INV-" . date('Ymd') . "-" . str_pad(mt_rand(1,999), 3, '0', STR_PAD_LEFT);
-
-    // Fetch data only if connection is successful
-    $suppliers = $conn->query("SELECT id, name, address FROM suppliers");
-    $branches = $conn->query("SELECT id, branch_name FROM branches");
-    $items = $conn->query("SELECT item_id, item_name, uom, unit_cost FROM items");
-    $accounts = $conn->query("SELECT account_code, account_name FROM chart_of_accounts");
-    
-    // Close connection after fetching data
-    $conn->close();
-
-} catch (Exception $e) {
-    die("Database Error: " . $e->getMessage());
+// Authentication check
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit();
 }
+
+// CSRF protection
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Initialize variables
+$search = $start_date = $end_date = '';
+$where = [];
+$params = [];
+$types = '';
+
+// Sorting configuration
+$allowed_sort = ['invoice_no', 'invoice_date', 'item_id', 'item_description', 'total_purchased_after_vat'];
+$sort = isset($_GET['sort']) && in_array($_GET['sort'], $allowed_sort) ? $_GET['sort'] : 'invoice_no';
+$order = isset($_GET['order']) && strtoupper($_GET['order']) === 'ASC' ? 'ASC' : 'DESC';
+
+// Search functionality
+if (isset($_GET['search']) && !empty(trim($_GET['search']))) {
+    $search = trim($_GET['search']);
+    $where[] = "(invoice_no LIKE ? OR item_description LIKE ? OR item_id LIKE ? OR reference LIKE ?)";
+    $params = array_merge($params, ["%$search%", "%$search%", "%$search%", "%$search%"]);
+    $types .= 'ssss';
+}
+
+// Date filtering
+if (isset($_GET['start_date']) && !empty($_GET['start_date'])) {
+    $start_date = $_GET['start_date'];
+    $end_date = isset($_GET['end_date']) && !empty($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
+    
+    $where[] = "(invoice_date BETWEEN ? AND ?)";
+    $params = array_merge($params, [$start_date, $end_date]);
+    $types .= 'ss';
+}
+
+// Build WHERE clause if conditions exist
+$where_clause = '';
+if (!empty($where)) {
+    $where_clause = 'WHERE ' . implode(' AND ', $where);
+}
+
+// Pagination
+$per_page = 15;
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($page - 1) * $per_page;
+
+// Count total records
+$count_sql = "SELECT COUNT(*) as total FROM inventory $where_clause";
+$count_stmt = $conn->prepare($count_sql);
+
+if (!empty($params)) {
+    $count_stmt->bind_param($types, ...$params);
+}
+$count_stmt->execute();
+$count_result = $count_stmt->get_result();
+$total_records = $count_result->fetch_assoc()['total'];
+$total_pages = ceil($total_records / $per_page);
+
+// Fetch data with pagination
+$sql = "SELECT * FROM inventory $where_clause ORDER BY $sort $order LIMIT ? OFFSET ?";
+$stmt = $conn->prepare($sql);
+
+// Add pagination parameters to existing params
+$params = array_merge($params, [$per_page, $offset]);
+$types .= 'ii';
+
+if (!empty($params)) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$result = $stmt->get_result();
+
+// Calculate summary statistics
+$summary_sql = "SELECT 
+                COALESCE(SUM(quantity), 0) as total_quantity,
+                COALESCE(SUM(total_purchased_before_vat), 0) as total_before_vat,
+                COALESCE(SUM(vat), 0) as total_vat,
+                COALESCE(SUM(total_purchased_after_vat), 0) as grand_total
+                FROM inventory $where_clause";
+
+$summary_stmt = $conn->prepare($summary_sql);
+if (!empty($where)) {
+    // For summary, we don't want the pagination parameters (last 2 elements)
+    $summary_params = array_slice($params, 0, -2);
+    $summary_types = substr($types, 0, -2);
+    $summary_stmt->bind_param($summary_types, ...$summary_params);
+}
+$summary_stmt->execute();
+$summary_result = $summary_stmt->get_result();
+$summary = $summary_result->fetch_assoc();
 ?>
 
-<!-- Rest of your HTML/PHP code -->
+
+
+
+
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sales Invoice Form</title>
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>Purchase Invoice Entry</title>
+ <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+ <style>
+ body {
+  background-color: #f0f2f5;
+ }
+
+ @media print {
+  .no-print {
+   display: none !important;
+  }
+ }
+
+ .invoice-container {
+  background: #fff;
+  padding: 25px;
+  border-radius: 10px;
+  max-width: 950px;
+  width: 100%;
+ }
+
+ .invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #ccc;
+  padding-bottom: 15px;
+  margin-bottom: 25px;
+ }
+
+ .invoice-logo {
+  height: 60px;
+  width: auto;
+ }
+
+ .form-control,
+ .form-select {
+  font-size: 13px;
+  padding: 6px 10px;
+ }
+
+ button[type="submit"] {
+  padding: 8px 20px;
+  font-size: 14px;
+ }
+
+ .table td input {
+  width: 100%;
+  font-size: 13px;
+ }
+ </style>
 </head>
+
+
+
 <body>
-
-<div class="container my-5">
-    <h2 class="text-center">Invoice Form</h2>
-    
-    <!-- Start of the form -->
-    <form id="invoice-form">
-        <table class="table table-bordered" id="invoice-table">
-            <thead>
-                <tr>
-                    <th>Item ID</th>
-                    <th>Item Description</th>
-                    <th>GL Account</th>
-                    <th>Quantity</th>
-                    <th>Unit Price</th>
-                    <th>Total Sales</th>
-                    <th>Job ID</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Dynamic rows will be added here -->
-            </tbody>
-        </table>
-
-        <div class="mb-3 text-center">
-            <button type="button" class="btn btn-success" onclick="addRow()">Add Row</button>
-            <button type="button" class="btn btn-danger" onclick="removeRow()">Remove Last Row</button>
-        </div>
-
-        <div class="mb-3">
-            <label for="total-sales" class="form-label">Total Sales (Before VAT)</label>
-            <input type="text" class="form-control" id="total-sales" name="total_sales" readonly>
-        </div>
-
-        <!-- Section to display VAT and Total after VAT -->
-        <div class="mb-3">
-            <label for="vat" class="form-label">VAT (15%)</label>
-            <input type="text" class="form-control" id="vat" name="vat" readonly>
-        </div>
-
-        <div class="mb-3">
-            <label for="grand-total" class="form-label">Sales Total (After VAT)</label>
-            <input type="text" class="form-control" id="grand-total" name="grand_total" readonly>
-        </div>
-
-        <div class="text-center">
-            <button type="submit" class="btn btn-primary">Save Sales</button>
-        </div>
-    </form>
-
-    <!-- Section to display Summary Sales Details after Saving -->
-    <div id="sales-summary" class="mt-5" style="display: none;">
-        <h3>Sales Summary</h3>
-        <p><strong>Total Sales (Before VAT):</strong> <span id="summary-total-sales"></span></p>
-        <p><strong>VAT (15%):</strong> <span id="summary-vat"></span></p>
-        <p><strong>Sales Total (After VAT):</strong> <span id="summary-grand-total"></span></p>
+ <div class="d-flex justify-content-center align-items-center min-vh-100 py-4">
+  <div class="invoice-container shadow-sm">
+   <!-- Invoice Header -->
+   <div class="invoice-header d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+    <div>
+     <h4 class="mb-0">ABC Company</h4>
+     <small>Bole, Addis Ababa | Tel: +251 912 345 678</small>
     </div>
-</div>
+    <img src="assets/images/child drinking.jpeg" alt="Company Logo" class="invoice-logo" style="height: 60px;">
+   </div>
 
-<!-- Bootstrap 5 JS & Popper -->
-<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.min.js"></script>
+   <!-- Action Buttons -->
+   <div class="d-flex flex-wrap gap-2 mb-3">
+    <button type="button" class="btn btn-info text-white" onclick="showInvoiceLists()">📂 Show Invoice_ Lists</button>
+    <button type="reset" class="btn btn-danger" onclick="clearForm()">🗑️ Clear Data</button>
+    <button type="button" class="btn btn-secondary no-print" onclick="printFullInvoice()">🖨️ Print</button>
 
-<script>
-// Function to add a new row
-function addRow() {
-    const tableBody = document.querySelector('#invoice-table tbody');
-    const row = document.createElement('tr');
+    <!-- close button -->
+    <button type="button" onclick="window.location.href='manage_inventory.php'" class="btn btn-danger">Close</button>
+   </div>
 
-    row.innerHTML = `
-        <td><input type="text" class="form-control" name="item_id[]"></td>
-        <td><input type="text" class="form-control" name="item_description[]"></td>
-        <td><input type="text" class="form-control" name="gl_account[]"></td>
-        <td><input type="number" class="form-control" name="quantity[]" oninput="calculateTotal()"></td>
-        <td><input type="number" class="form-control" name="unit_price[]" oninput="calculateTotal()"></td>
-        <td><input type="number" class="form-control" name="total_sales[]" readonly></td>
-        <td><input type="text" class="form-control" name="job_id[]"></td>
-        <td><button type="button" class="btn btn-danger" onclick="removeRow(this)">Remove</button></td>
-    `;
-    
-    tableBody.appendChild(row);
-}
 
-// Function to remove the last row
-function removeRow(button) {
-    const row = button.closest('tr');
-    if (document.querySelectorAll('#invoice-table tbody tr').length > 1) {
-        row.remove();
-        calculateTotal();
-    }
-}
 
-// Function to calculate totals (Before and After VAT)
-function calculateTotal() {
-    let totalSales = 0;
+   <!-- Invoice Form Container -->
+   <div id="invoice-<?= $index ?>" class="invoice-container">
 
-    // Get all rows in the table
-    const rows = document.querySelectorAll('#invoice-table tbody tr');
+    <!-- Form Start -->
+    <form method="POST" enctype="multipart/form-data">
+     <!-- Basic Information -->
+     <div class="row g-2 mb-2">
+      <div class="col-md-3"><input type="text" name="purchase_order_no" class="form-control" placeholder="Order No"
+        required></div>
+      <div class="col-md-3"><input type="text" name="purchase_invoice_no" class="form-control" placeholder="Invoice No"
+        required></div>
+      <div class="col-md-3"><input type="text" name="reference" class="form-control" placeholder="Reference" required>
+      </div>
+      <div class="col-md-3"><input type="date" name="invoice_date" class="form-control" required></div>
+     </div>
 
-    rows.forEach(row => {
-        const quantity = parseFloat(row.querySelector('[name="quantity[]"]').value) || 0;
-        const unitPrice = parseFloat(row.querySelector('[name="unit_price[]"]').value) || 0;
+     <div class="row g-2 mb-2">
+      <div class="col-md-3"><input type="text" name="vendor_id" class="form-control" placeholder="Vendor ID" required>
+      </div>
+      <div class="col-md-3"><input type="text" name="vendor_company_name" class="form-control"
+        placeholder="Company Name" required></div>
+      <div class="col-md-3"><input type="text" name="vendor_name" class="form-control" placeholder="Vendor Name"
+        required></div>
+      <div class="col-md-3"><input type="text" name="vendor_tin_no" class="form-control" placeholder="TIN No" required>
+      </div>
+     </div>
 
-        const total = quantity * unitPrice;
+     <div class="row g-2 mb-2">
+      <div class="col-md-3"><input type="text" name="vendor_phone" class="form-control" placeholder="Phone" required>
+      </div>
+      <div class="col-md-3"><input type="text" name="purchase_person_id" class="form-control" placeholder="Purchaser ID"
+        required></div>
+      <div class="col-md-3"><input type="text" name="purchase_person_name" class="form-control"
+        placeholder="Purchaser Name" required></div>
+      <div class="col-md-3">
+       <select class="form-select" name="payment_method" required>
+        <option value="">Payment Method</option>
+        <option value="Cash">Cash</option>
+        <option value="Cheque">Cheque</option>
+        <option value="Bank Transfer">Bank Transfer</option>
+       </select>
+      </div>
+     </div>
 
-        // Set value for total sales before VAT
-        row.querySelector('[name="total_sales[]"]').value = total.toFixed(2);
+     <!-- Items Purchased -->
+     <h6 class="mt-4">Items Purchased</h6>
+     <div id="alertSuccess" class="alert alert-success d-none">Inventory added successfully!</div>
 
-        totalSales += total;
-    });
+     <table class="table table-bordered table-sm" id="itemTable">
+      <thead class="table-light">
+       <tr>
+        <th>Item ID</th>
+        <th>Description</th>
+        <th>Qty</th>
+        <th>Unit Price</th>
+        <th>Subtotal</th>
+        <th><button type="button" class="btn btn-sm btn-success" onclick="addRow()">+</button></th>
+       </tr>
+      </thead>
+      <tbody>
+       <tr>
+        <td><input type="text" name="item_id[]" class="form-control form-control-sm" required></td>
+        <td><input type="text" name="description[]" class="form-control form-control-sm" required></td>
+        <td><input type="number" name="qty[]" class="form-control form-control-sm qty" oninput="updateTotals()"
+          required></td>
+        <td><input type="number" name="unit_price[]" class="form-control form-control-sm unit-price"
+          oninput="updateTotals()" required></td>
+        <td><input type="text" name="subtotal[]" class="form-control form-control-sm subtotal" readonly></td>
+        <td><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(this)">-</button></td>
+       </tr>
+      </tbody>
+     </table>
 
-    // Calculate VAT (15%)
-    const vat = totalSales * 0.15;
-    const grandTotal = totalSales + vat;
+     <!-- Summary Section -->
+     <div class="row g-2 mt-2">
+      <div class="col-md-4 offset-md-8">
+       <table class="table table-borderless table-sm">
+        <tr>
+         <td class="text-end">Total:</td>
+         <td><input type="text" id="total" name="total" class="form-control form-control-sm text-end" readonly></td>
+        </tr>
+        <tr>
+         <td class="text-end">VAT (15%):</td>
+         <td><input type="text" id="vat" name="vat" class="form-control form-control-sm text-end" readonly></td>
+        </tr>
+        <tr>
+         <td class="text-end fw-bold">Grand Total:</td>
+         <td><input type="text" id="grandTotal" name="grand_total" class="form-control form-control-sm text-end fw-bold"
+           readonly></td>
+        </tr>
+       </table>
+       <label class="form-label">Amount in Words:</label>
+       <textarea id="amountInWords" class="form-control form-control-sm" rows="2" readonly></textarea>
+      </div>
+     </div>
 
-    // Update the total sales, VAT, and grand total fields
-    document.getElementById('total-sales').value = totalSales.toFixed(2);
-    document.getElementById('vat').value = vat.toFixed(2);
-    document.getElementById('grand-total').value = grandTotal.toFixed(2);
-}
+     <button type="submit" name="save_invoice" class="btn btn-success">💾 Save Invoice</button>
+     <script>
+     function updateTotals() {
+      let rows = document.querySelectorAll('#itemTable tbody tr');
+      let total = 0;
 
-// Handle form submission
-document.getElementById('invoice-form').addEventListener('submit', function(event) {
-    event.preventDefault(); // Prevent default form submission
+      rows.forEach(row => {
+       const qty = parseFloat(row.querySelector('[name="qty[]"]').value) || 0;
+       const price = parseFloat(row.querySelector('[name="unit_price[]"]').value) || 0;
+       const subtotal = qty * price;
+       row.querySelector('[name="subtotal[]"]').value = subtotal.toFixed(2);
+       total += subtotal;
+      });
 
-    // Get the total sales, VAT, and grand total values
-    const totalSales = parseFloat(document.getElementById('total-sales').value);
-    const vat = parseFloat(document.getElementById('vat').value);
-    const grandTotal = parseFloat(document.getElementById('grand-total').value);
+      const vat = total * 0.15;
+      const grandTotal = total + vat;
 
-    // Log values for debugging
-    console.log("Total Sales (Before VAT):", totalSales);
-    console.log("VAT (15%):", vat);
-    console.log("Grand Total (After VAT):", grandTotal);
+      document.getElementById('total').value = total.toFixed(2);
+      document.getElementById('vat').value = vat.toFixed(2);
+      document.getElementById('grandTotal').value = grandTotal.toFixed(2);
+     }
 
-    // Check if the values are valid
-    if (isNaN(totalSales) || isNaN(vat) || isNaN(grandTotal)) {
-        alert("Please calculate the totals first.");
-        return;
-    }
+     function addRow() {
+      const table = document.querySelector('#itemTable tbody');
+      const newRow = table.rows[0].cloneNode(true);
+      newRow.querySelectorAll('input').forEach(input => input.value = '');
+      table.appendChild(newRow);
+     }
 
-    // Display the sales summary section
-    document.getElementById('sales-summary').style.display = 'block';
-    document.getElementById('summary-total-sales').textContent = totalSales.toFixed(2);
-    document.getElementById('summary-vat').textContent = vat.toFixed(2);
-    document.getElementById('summary-grand-total').textContent = grandTotal.toFixed(2);
+     function removeRow(btn) {
+      const row = btn.closest('tr');
+      const table = document.querySelector('#itemTable tbody');
+      if (table.rows.length > 1) row.remove();
+     }
 
-    // Optionally, reset the form or perform further processing
-});
-</script>
+     function clearForm() {
+      if (confirm("Clear all entered data?")) {
+       document.querySelector("form").reset();
+       updateTotals();
+      }
+     }
 
-</body>
-</html>
+     function printFullInvoice() {
+      window.print();
+     }
+     </script>
+
+
+     <!-- Signature Section -->
+     <div class="row mt-4">
+      <div class="col-md-6 text-center">
+
+       <p class="mt-1"><u>___________________________</u><br><strong>Prepared By</strong></p>
+      </div>
+      <div class="col-md-6 text-center">
+
+       <p class="mt-1"><u>___________________________</u><br><strong>Approved By</strong></p>
+      </div>
+     </div>
+
+
+   </div>
+   </form>
+  </div>
+
+
+  <!-- JavaScript Section -->
+  <script>
+  function convertToWords(amount) {
+   const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'
+   ];
+   const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+   function numToWords(n) {
+    if (n === 0) return '';
+    if (n < 20) return ones[n];
+    if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+    if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' and ' + numToWords(n % 100) : '');
+    if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n % 1000) :
+     '');
+    if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(n %
+     1000000) : '');
+    if (n < 1000000000000) return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' +
+     numToWords(n % 1000000000) : '');
+    return 'Amount too large'; // Above a trillion
+   }
+
+   amount = parseFloat(amount);
+   if (isNaN(amount)) return 'Invalid amount';
+
+   const parts = amount.toFixed(2).split('.');
+   const birr = parseInt(parts[0]);
+   const cents = parseInt(parts[1]);
+
+   let words = '';
+   if (birr > 0) words += numToWords(birr) + ' Birr';
+   if (cents > 0) words += ' and ' + numToWords(cents) + ' Cents';
+   if (words === '') words = 'Zero Birr';
+
+   return words.charAt(0).toUpperCase() + words.slice(1) + ' only';
+  }
+  </script>
+
+
+  <script>
+  function addRow() {
+   const table = document.querySelector('#itemTable tbody');
+   const newRow = table.rows[0].cloneNode(true);
+   newRow.querySelectorAll('input').forEach(input => input.value = '');
+   table.appendChild(newRow);
+  }
+
+  function removeRow(button) {
+   const row = button.closest('tr');
+   const table = document.querySelector('#itemTable tbody');
+   if (table.rows.length > 1) row.remove();
+  }
+
+  function updateTotals() {
+   let total = 0;
+   document.querySelectorAll('#itemTable tbody tr').forEach(row => {
+    const qty = parseFloat(row.querySelector('.qty').value) || 0;
+    const price = parseFloat(row.querySelector('.unit-price').value) || 0;
+    const subtotal = qty * price;
+    row.querySelector('.subtotal').value = formatCurrency(subtotal);
+    total += subtotal;
+   });
+
+   const vat = total * 0.15;
+   const grandTotal = total + vat;
+
+   document.getElementById("total").value = formatCurrency(total);
+   document.getElementById("vat").value = formatCurrency(vat);
+   document.getElementById("grandTotal").value = formatCurrency(grandTotal);
+   document.getElementById("amountInWords").value = convertToWords(grandTotal) + " birr only";
+  }
+
+  function clearForm() {
+   document.querySelector("form").reset();
+   const rows = document.querySelectorAll("#itemTable tbody tr");
+   rows.forEach((row, index) => index > 0 && row.remove());
+   updateTotals();
+  }
+
+  function showInvoiceLists() {
+   window.location.href = "invoice_lists.php";
+  }
+
+  function printFullInvoice() {
+   const content = document.querySelector(".invoice-container").innerHTML;
+   const win = window.open('', '', 'width=800,height=600');
+   win.document.write(`<html><head><title>Print Invoice</title></head><body>${content}</body></html>`);
+   win.document.close();
+   win.print();
+  }
+
+  function formatCurrency(amount) {
+   return parseFloat(amount).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+   });
+  }
+
+  // Simple number to words converter (for demo purposes)
+  </script>
+
+  <!-- Close button -->
+  <script>
+  function closeInvoice(id) {
+   const invoiceBox = document.getElementById(id);
+   if (invoiceBox) invoiceBox.style.display = 'none';
+  }
+  </script>

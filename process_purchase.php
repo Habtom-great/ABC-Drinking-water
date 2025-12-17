@@ -3,7 +3,7 @@
 $host = "localhost"; // Replace with your database host
 $username = "root"; // Replace with your database username
 $password = ""; // Replace with your database password
-$dbname = "inventory_management"; // Replace with your database name
+$dbname = "ABC_Company"; // Replace with your database name
 
 $conn = new mysqli($host, $username, $password, $dbname);
 
