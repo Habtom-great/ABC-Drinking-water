@@ -1,101 +1,129 @@
 <?php
 session_start();
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
+
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
 
-// Include database connection
-include 'db_connection.php';
+require_once 'db_connection.php';
 
-// Fetch activity logs from the database
-$sql = "SELECT log_id, user_name, action, details, timestamp FROM activity_log ORDER BY timestamp DESC";
+/* Fetch activity logs */
+$sql = "SELECT log_id, user_name, action, details, timestamp 
+        FROM activity_log 
+        ORDER BY timestamp DESC";
+
 $result = $conn->query($sql);
-
-// Check if query succeeded
-if ($result === false) {
-    die("SQL Error: " . $conn->error);
+if (!$result) {
+    die("Database Error: " . $conn->error);
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Activity Log</title>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Custom CSS -->
+    <title>Activity Log | Admin Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
     <style>
         body {
-            background-color: #f8f9fa;
+            background-color: #f4f6f9;
         }
-        .header {
-            background-color: #343a40;
-            color: white;
+        .page-header {
+            background: #212529;
+            color: #fff;
             padding: 20px;
-            text-align: center;
+            border-radius: 6px;
         }
         .table-container {
-            margin: 30px auto;
-            background: white;
-            padding: 20px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-            border-radius: 8px;
+            background: #ffffff;
+            padding: 25px;
+            border-radius: 6px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+            margin-top: 20px;
+        }
+        .table th {
+            background-color: #343a40;
+            color: #fff;
+            white-space: nowrap;
+        }
+        .badge-action {
+            font-size: 0.85rem;
         }
         .footer {
+            margin-top: 40px;
             text-align: center;
-            margin-top: 30px;
-            color: gray;
+            font-size: 0.9rem;
+            color: #6c757d;
         }
     </style>
 </head>
+
 <body>
+
+<div class="container my-4">
+
     <!-- Header -->
-    <div class="header">
-        <h1>Activity Log</h1>
-        <p>View all user activities in the system</p>
-        <a href="admin_dashboard.php" class="btn btn-light">Back to Dashboard</a>
+    <div class="page-header d-flex justify-content-between align-items-center">
+        <div>
+            <h3 class="mb-0">Activity Log</h3>
+            <small>System audit trail and user activities</small>
+        </div>
+        <a href="admin_dashboard.php" class="btn btn-outline-light btn-sm">
+            ← Back to Dashboard
+        </a>
     </div>
 
-    <!-- Activity Log Table -->
-    <div class="container table-container">
-        <h3>Recent Activities</h3>
+    <!-- Table -->
+    <div class="table-container">
+        <h5 class="mb-3">Recent Activities</h5>
+
         <?php if ($result->num_rows > 0): ?>
-            <table class="table table-striped table-bordered">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Log ID</th>
-                        <th>User Name</th>
-                        <th>Action</th>
-                        <th>Details</th>
-                        <th>Timestamp</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php while ($row = $result->fetch_assoc()): ?>
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover align-middle">
+                    <thead>
                         <tr>
-                            <td><?php echo htmlspecialchars($row['log_id']); ?></td>
-                            <td><?php echo htmlspecialchars($row['user_name']); ?></td>
-                            <td><?php echo htmlspecialchars($row['action']); ?></td>
-                            <td><?php echo htmlspecialchars($row['details']); ?></td>
-                            <td><?php echo htmlspecialchars($row['timestamp']); ?></td>
+                            <th>#</th>
+                            <th>User</th>
+                            <th>Action</th>
+                            <th>Details</th>
+                            <th>Date & Time</th>
                         </tr>
-                    <?php endwhile; ?>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($row['log_id']) ?></td>
+                                <td><?= htmlspecialchars($row['user_name']) ?></td>
+                                <td>
+                                    <span class="badge bg-info badge-action">
+                                        <?= htmlspecialchars($row['action']) ?>
+                                    </span>
+                                </td>
+                                <td><?= htmlspecialchars($row['details']) ?></td>
+                                <td><?= date("Y-m-d H:i", strtotime($row['timestamp'])) ?></td>
+                            </tr>
+                        <?php endwhile; ?>
+                    </tbody>
+                </table>
+            </div>
         <?php else: ?>
-            <p class="text-center">No activities recorded yet.</p>
+            <div class="alert alert-info text-center">
+                No activity records found.
+            </div>
         <?php endif; ?>
     </div>
 
     <!-- Footer -->
     <div class="footer">
-        <p>&copy; <?php echo date("Y"); ?> Inventory Management System</p>
+        &copy; <?= date("Y"); ?> Inventory Management System | Activity Monitoring
     </div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

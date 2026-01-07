@@ -115,7 +115,7 @@ unset($_SESSION['message_type']);
  .user-table td {
   text-align: center;
   padding: 15px;
-  font-size: 14px;
+  font-size: 13.6px;
  }
 
  .user-table th a {

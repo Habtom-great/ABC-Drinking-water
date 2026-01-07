@@ -182,7 +182,8 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
      </div>
     </div>
    </div>
-
+</div>
+</div>
    <!-- Footer -->
    <div class="footer">
     &copy; <?php echo date("Y"); ?> Inventory Management System | All Rights Reserved.

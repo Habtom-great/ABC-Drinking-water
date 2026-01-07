@@ -5,7 +5,8 @@ require 'db_connect.php';
 // Check if the form is submitted via POST
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Check if form values exist and are not empty
-    $name = isset($_POST['name']) ? trim($_POST['name']) : '';
+    $last_name = isset($_POST['last_name']) ? trim($_POST['last_name']) : '';
+    $first_name = isset($_POST['first_name']) ? trim($_POST['first_name']) : '';
     $email = isset($_POST['email']) ? trim($_POST['email']) : '';
     $password = isset($_POST['password']) ? $_POST['password'] : ''; // Don't hash the password until all validation checks pass
     $role = isset($_POST['role']) ? $_POST['role'] : '';
@@ -19,7 +20,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $password = password_hash($password, PASSWORD_BCRYPT);
 
         // SQL to insert user data into the database
-        $sql = "INSERT INTO users (name, email, password, role, gender) VALUES ('$name', '$email', '$password', '$role', '$gender')";
+        $sql = "INSERT INTO users (name, email, password, role, gender) VALUES ('$last_name','$first_name',  '$email', '$password', '$role', '$gender')";
 
         if ($conn->query($sql) === TRUE) {
             echo "<script>

@@ -19,13 +19,10 @@ if (isset($_GET['staff_id'])) {
     $query = "SELECT * FROM staff WHERE staff_id = $staff_id";
     $result = mysqli_query($conn, $query);
 
-    // Check if the query was successful
     if (!$result) {
-        // Query failed
         $error = "Error fetching staff details: " . mysqli_error($conn) . "<br>SQL Query: $query";
     } else {
         $staff = mysqli_fetch_assoc($result);
-
         if (!$staff) {
             $error = "Staff not found!";
         }
@@ -52,41 +49,45 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $experience = $_POST['experience'];
     $skills = $_POST['skills'];
 
-    // Handle image upload
-    if ($_FILES['profile_image']['error'] == 0) {
-        $image_name = $_FILES['profile_image']['name'];
-        $image_tmp = $_FILES['profile_image']['tmp_name'];
-        $image_ext = pathinfo($image_name, PATHINFO_EXTENSION);
+ // Start with current image
+$profile_image = $staff['profile_image']; // important: initialize with existing image
 
-        // Validate image extension
-        if (!in_array(strtolower($image_ext), ['jpg', 'jpeg', 'png'])) {
-            $error = "Only JPG, JPEG, and PNG files are allowed.";
-        } else {
-            // Move the uploaded image to the desired directory
-            $new_image_name = "uploads/" . time() . "_" . $image_name;
-            move_uploaded_file($image_tmp, $new_image_name);
+// Ensure uploads folder exists and is writable
+$upload_dir = __DIR__ . "/uploads/";
+if (!file_exists($upload_dir)) {
+    mkdir($upload_dir, 0777, true); // full write permission
+}
 
-            // Update the staff record with the new image name
-            $update_query = "UPDATE staff SET 
-                first_name = '$first_name', 
-                middle_name = '$middle_name', 
-                last_name = '$last_name', 
-                email = '$email', 
-                telephone = '$telephone', 
-                address = '$address', 
-                role = '$role',
-                department = '$department',
-                position = '$position',
-                salary = '$salary',
-                hire_date = '$hire_date',
-                termination_date = '$termination_date',
-                experience = '$experience',
-                skills = '$skills',
-                profile_image = '$new_image_name'
-                WHERE staff_id = $staff_id";
-        }
+// Handle image upload
+if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
+    $image_name = basename($_FILES['profile_image']['name']);
+    $image_tmp = $_FILES['profile_image']['tmp_name'];
+    $image_ext = strtolower(pathinfo($image_name, PATHINFO_EXTENSION));
+
+    if (!in_array($image_ext, ['jpg','jpeg','png'])) {
+        $error = "Only JPG, JPEG, and PNG files are allowed.";
     } else {
-        // If no image is uploaded, use the old one
+        $new_image_name = time() . "_" . preg_replace("/[^a-zA-Z0-9_\.-]/", "_", $image_name);
+        $destination = $upload_dir . $new_image_name;
+
+        if (is_uploaded_file($image_tmp)) {
+            if (move_uploaded_file($image_tmp, $destination)) {
+                // Delete old image if exists and not default
+                if ($staff['profile_image'] && file_exists(__DIR__ . "/" . $staff['profile_image'])) {
+                    unlink(__DIR__ . "/" . $staff['profile_image']);
+                }
+                $profile_image = "uploads/" . $new_image_name;
+            } else {
+                $error = "Failed to move uploaded file. Check folder permissions.";
+            }
+        } else {
+            $error = "Temporary file not found. Upload failed.";
+        }
+    }
+}
+
+    // Only run update if no error
+    if (!$error) {
         $update_query = "UPDATE staff SET 
             first_name = '$first_name', 
             middle_name = '$middle_name', 
@@ -101,17 +102,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             hire_date = '$hire_date',
             termination_date = '$termination_date',
             experience = '$experience',
-            skills = '$skills'
+            skills = '$skills',
+            profile_image = '$profile_image'
             WHERE staff_id = $staff_id";
-    }
 
-    if (mysqli_query($conn, $update_query)) {
-        $success = "Staff updated successfully!";
-    } else {
-        $error = "Error updating staff: " . mysqli_error($conn);
+        if (mysqli_query($conn, $update_query)) {
+            $success = "Staff updated successfully!";
+            // Update $staff array so the form shows new image immediately
+            $staff['profile_image'] = $profile_image;
+        } else {
+            $error = "Error updating staff: " . mysqli_error($conn);
+        }
     }
 }
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">

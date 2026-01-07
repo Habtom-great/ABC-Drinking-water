@@ -15,6 +15,9 @@ $result = mysqli_query($conn, $query);
 if (!$result) {
     die("Error fetching staff: " . mysqli_error($conn));
 }
+
+// Default image path for all staff except Habt.jpg
+$defaultImage = "uploads/staff/profile_images/Habt.jpg";
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -86,7 +89,7 @@ if (!$result) {
   box-shadow: var(--box-shadow);
   padding: 1rem;
   margin: 0 auto 1.5rem;
-  max-width: 1200px;
+  max-width: 1100px;
  }
 
  .table thead {
@@ -102,8 +105,8 @@ if (!$result) {
  }
 
  .profile-img {
-  width: 36px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   object-fit: cover;
   border: 1px solid var(--primary);
@@ -216,8 +219,6 @@ if (!$result) {
    </div>
   </div>
 
-
-
   <!-- Staff Table Section -->
   <div class="staff-table-container">
    <h2 class="text-center"><i class="fas fa-users me-1"></i>Staff Members</h2>
@@ -244,28 +245,24 @@ if (!$result) {
        <td><?php echo htmlspecialchars($staff['last_name']); ?></td>
        <td><?php echo htmlspecialchars($staff['middle_name']); ?></td>
        <td><?php echo htmlspecialchars($staff['first_name']); ?></td>
-       <td><a
-         href="mailto:<?php echo htmlspecialchars($staff['email']); ?>"><?php echo htmlspecialchars($staff['email']); ?></a>
-       </td>
-       <td><a
-         href="tel:<?php echo htmlspecialchars($staff['telephone']); ?>"><?php echo htmlspecialchars($staff['telephone']); ?></a>
-       </td>
-       <td>
-        <img src="<?php echo htmlspecialchars($staff['profile_image']); ?>" class="profile-img"
-         onerror="this.src='assets/images/default-profile.png'">
-       </td>
+       <td><a href="mailto:<?php echo htmlspecialchars($staff['email']); ?>"><?php echo htmlspecialchars($staff['email']); ?></a></td>
+       <td><a href="tel:<?php echo htmlspecialchars($staff['telephone']); ?>"><?php echo htmlspecialchars($staff['telephone']); ?></a></td>
+     <td>
+    <?php
+        $img = !empty($staff['profile_image']) ? $staff['profile_image'] : $defaultImage;
+    ?>
+    <img src="<?php echo htmlspecialchars($img); ?>?v=<?= time(); ?>" class="profile-img" alt="Profile Photo">
+</td>
+
        <td>
         <div class="action-btns">
-         <a href="edit_staff.php?staff_id=<?php echo urlencode($staff['staff_id']); ?>"
-          class="btn btn-sm btn-primary action-btn">
+         <a href="edit_staff.php?staff_id=<?php echo urlencode($staff['staff_id']); ?>" class="btn btn-sm btn-primary action-btn">
           <i class="fas fa-edit"></i>
          </a>
-         <a href="delete_staff.php?staff_id=<?php echo urlencode($staff['staff_id']); ?>"
-          class="btn btn-sm btn-danger action-btn" onclick="return confirm('Delete this staff member?')">
+         <a href="delete_staff.php?staff_id=<?php echo urlencode($staff['staff_id']); ?>" class="btn btn-sm btn-danger action-btn" onclick="return confirm('Delete this staff member?')">
           <i class="fas fa-trash-alt"></i>
          </a>
-         <a href="staff_history.php?staff_id=<?php echo urlencode($staff['staff_id']); ?>"
-          class="btn btn-sm btn-info action-btn">
+         <a href="staff_history.php?staff_id=<?php echo urlencode($staff['staff_id']); ?>" class="btn btn-sm btn-info action-btn">
           <i class="fas fa-history"></i>
          </a>
         </div>
@@ -315,5 +312,4 @@ if (!$result) {
  });
  </script>
 </body>
-
 </html>

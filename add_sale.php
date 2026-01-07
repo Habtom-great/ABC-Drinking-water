@@ -167,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
  }
 
  .container {
-  max-width: 800px;
+  max-width: 1100px;
  }
 
  .card {
