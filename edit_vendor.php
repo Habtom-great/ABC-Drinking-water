@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
     if (mysqli_query($conn, $update_query)) {
         echo "Vendor updated successfully!";
-        header("Location: manage_venders.php"); // Redirect to manage vendors page
+        header("Location: manage_vendors.php"); // Redirect to manage vendors page
         exit();
     } else {
         echo "Error updating vendor: " . mysqli_error($conn);
@@ -213,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
  <!-- Navbar -->
  <div class="navbar">
-  <a href="manage_venders.php" class="btn btn-manage">Manage Vendors</a>
+  <a href="manage_vendors.php" class="btn btn-manage">Manage Vendors</a>
   <a href="logout.php" class="btn btn-logout">Logout</a>
  </div>
 

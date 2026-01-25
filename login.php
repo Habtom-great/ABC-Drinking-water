@@ -1,3 +1,14 @@
+
+
+<?php
+session_start();
+if (isset($_SESSION['success'])) {
+    echo "<div class='alert alert-success text-center'>" . $_SESSION['success'] . "</div>";
+    unset($_SESSION['success']);
+}
+?>
+
+
 <?php include 'header.php'; ?>
 <!DOCTYPE html>
 <html lang="en">

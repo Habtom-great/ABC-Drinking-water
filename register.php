@@ -1,151 +1,207 @@
 <?php include 'header.php'; ?>
 <?php
+// --------------------
+// SESSION & ERRORS
+// --------------------
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// --------------------
+// DB CONNECTION
+// --------------------
 require 'db_connect.php';
 
-// Check if the form is submitted via POST
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Check if form values exist and are not empty
-    $last_name = isset($_POST['last_name']) ? trim($_POST['last_name']) : '';
-    $first_name = isset($_POST['first_name']) ? trim($_POST['first_name']) : '';
-    $email = isset($_POST['email']) ? trim($_POST['email']) : '';
-    $password = isset($_POST['password']) ? $_POST['password'] : ''; // Don't hash the password until all validation checks pass
-    $role = isset($_POST['role']) ? $_POST['role'] : '';
-    $gender = isset($_POST['gender']) ? $_POST['gender'] : '';
+// --------------------
+// SHOW SUCCESS ABOVE HEADER
+// --------------------
+if (isset($_SESSION['success'])) {
+    echo "<div style='padding:15px;background:#d4edda;color:#155724;border:1px solid #c3e6cb;text-align:center;'>
+            {$_SESSION['success']}
+          </div>";
+    unset($_SESSION['success']);
+}
 
-    // Check if all fields are filled
-    if (empty($name) || empty($email) || empty($password) || empty($role) || empty($gender)) {
-        echo "<script>alert('All fields are required.');</script>";
+$message = "";
+
+// --------------------
+// FORM SUBMIT
+// --------------------
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+    $username     = trim($_POST['username'] ?? '');
+    $last_name    = trim($_POST['last_name'] ?? '');
+    $middle_name  = trim($_POST['middle_name'] ?? '');
+    $first_name   = trim($_POST['first_name'] ?? '');
+    $gender       = $_POST['gender'] ?? '';
+    $telephone    = trim($_POST['telephone'] ?? '');
+    $address      = trim($_POST['address'] ?? '');
+    $email        = trim($_POST['email'] ?? '');
+    $password     = $_POST['password'] ?? '';
+    $role         = $_POST['role'] ?? '';
+
+    // --------------------
+    // IMAGE (OPTIONAL)
+    // --------------------
+    $profile_image = null;
+    if (!empty($_FILES['profile_image']['name'])) {
+        $upload_dir = "uploads/users/";
+        if (!is_dir($upload_dir)) {
+            mkdir($upload_dir, 0777, true);
+        }
+        $ext = pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION);
+        $profile_image = uniqid("user_") . "." . $ext;
+        move_uploaded_file($_FILES['profile_image']['tmp_name'], $upload_dir . $profile_image);
+    }
+
+    // --------------------
+    // VALIDATION
+    // --------------------
+    if (empty($username) || empty($last_name) || empty($first_name) || empty($email) || empty($password) || empty($gender) || empty($role)) {
+        $message = "<div class='alert alert-danger'>Please fill all required fields.</div>";
     } else {
-        // Hash password only if all fields are filled
-        $password = password_hash($password, PASSWORD_BCRYPT);
+        // Check email
+        $check = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
+        $check->bind_param("s", $email);
+        $check->execute();
+        $check->store_result();
 
-        // SQL to insert user data into the database
-        $sql = "INSERT INTO users (name, email, password, role, gender) VALUES ('$last_name','$first_name',  '$email', '$password', '$role', '$gender')";
-
-        if ($conn->query($sql) === TRUE) {
-            echo "<script>
-                    alert('Registration Successful! Redirecting to Login...');
-                    window.location.href = 'login.php';
-                  </script>";
+        if ($check->num_rows > 0) {
+            $message = "<div class='alert alert-danger'>Email already registered.</div>";
         } else {
-            echo "Error: " . $conn->error;
+            $hashed_password = password_hash($password, PASSWORD_BCRYPT);
+            $full_name = trim("$first_name $middle_name $last_name");
+
+            // --------------------
+            // INSERT USER
+            // --------------------
+            $sql = "
+            INSERT INTO users
+            (username, last_name, middle_name, first_name, email, telephone, address, name, password, role, gender)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ";
+
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) {
+                die("SQL Prepare Failed: " . $conn->error);
+            }
+
+            $stmt->bind_param(
+                "sssssssssss",
+                $username,
+                $last_name,
+                $middle_name,
+                $first_name,
+                $email,
+                $telephone,
+                $address,
+                $full_name,
+                $hashed_password,
+                $role,
+                $gender
+            );
+
+            if ($stmt->execute()) {
+                $_SESSION['success'] = "Registration successful. Please login.";
+                header("Location: register.php");
+                exit();
+            } else {
+                $message = "<div class='alert alert-danger'>{$stmt->error}</div>";
+            }
         }
     }
 }
 ?>
 
+
+
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>Register</title>
- <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
- <style>
- body {
-  font-family: Arial, sans-serif;
-  background-color: #f8f9fa;
-  margin: 0;
-  padding: 0;
- }
+<meta charset="UTF-8">
+<title>User Registration</title>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 
- .form-container {
-  margin: 5% auto;
-  max-width: 400px;
-  padding: 25px;
-  background-color: #fff;
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
- }
+<style>
+/* --------- Compact Form Styles --------- */
+.register-wrapper {
+    max-width: 520px;
+    margin: 40px auto;
+}
 
- h2 {
-  text-align: center;
-  color: #343a40;
-  margin-bottom: 20px;
- }
+.register-card {
+    padding: 22px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
 
- .form-group label {
-  font-weight: bold;
- }
+.form-control, select {
+    font-size: 14px;
+    padding: 8px 10px;
+}
 
- .btn-primary {
-  width: 100%;
-  background-color: #007bff;
-  border: none;
- }
+label {
+    font-weight: 600;
+    font-size: 13px;
+}
 
- .btn-primary:hover {
-  background-color: #0056b3;
- }
-
- .toggle-link {
-  margin-top: 15px;
-  text-align: center;
- }
-
- .toggle-link a {
-  color: #007bff;
-  text-decoration: none;
- }
-
- .toggle-link a:hover {
-  text-decoration: underline;
- }
-
- .alert {
-  margin-bottom: 20px;
- }
- </style>
+.btn {
+    padding: 10px;
+    font-size: 15px;
+}
+</style>
 </head>
-
 <body>
 
- <div class="container">
-  <!-- Registration Form -->
-  <div class="form-container">
-   <h2>Register</h2>
-   <form method="POST">
-    <div class="form-group">
-     <label for="name">Full Name</label>
-     <input type="text" class="form-control" name="name" required>
-    </div>
-    <div class="form-group">
-     <label for="email">Email</label>
-     <input type="email" class="form-control" name="email" required>
-    </div>
-    <div class="form-group">
-     <label for="password">Password</label>
-     <input type="password" class="form-control" name="password" required>
-    </div>
-    <div class="form-group">
-     <label for="role">Role</label>
-     <select class="form-control" name="role" required>
-      <option value="admin">Admin</option>
-      <option value="staff">Staff</option>
-      <option value="salesperson">Salesperson</option> <!-- Added Salesperson role -->
-      <option value="user">User</option>
-     </select>
-    </div>
-    <div class="form-group">
-     <label for="gender">Gender</label><br>
-     <input type="radio" name="gender" value="Male" required> Male
-     <input type="radio" name="gender" value="Female" required> Female
-     <input type="radio" name="gender" value="Secret" required> Secret
-    </div>
-    <button type="submit" class="btn btn-primary">Register</button>
-   </form>
-   <div class="toggle-link">
-    <p>Already registered? <a href="login.php">Log In Here</a></p>
-   </div>
-  </div>
- </div>
+<div class="container">
+    <div class="register-wrapper">
+        <?= $message ?>
 
- <!-- Bootstrap JS and jQuery -->
- <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
- <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.bundle.min.js"></script>
+        <form method="POST" enctype="multipart/form-data" class="card register-card">
+            <h4 class="mb-3 text-center">User Registration</h4>
+
+            <input type="text" name="username" class="form-control mb-2" placeholder="Username" required>
+
+            <div class="row">
+                <div class="col">
+                    <input type="text" name="last_name" class="form-control mb-2" placeholder="Last Name" required>
+                </div>
+                <div class="col">
+                    <input type="text" name="middle_name" class="form-control mb-2" placeholder="Middle Name">
+                </div>
+                <div class="col">
+                    <input type="text" name="first_name" class="form-control mb-2" placeholder="First Name" required>
+                </div>
+            </div>
+
+            <select name="gender" class="form-control mb-2" required>
+                <option value="">Select Gender</option>
+                <option>Male</option>
+                <option>Female</option>
+            </select>
+
+            <input type="text" name="telephone" class="form-control mb-2" placeholder="Telephone">
+            <input type="text" name="address" class="form-control mb-2" placeholder="Address">
+            <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
+            <input type="password" name="password" class="form-control mb-2" placeholder="Password" required>
+
+            <select name="role" class="form-control mb-2" required>
+                <option value="admin">Admin</option>
+                <option value="staff">Staff</option>
+                <option value="salesperson">Salesperson</option>
+                <option value="user">User</option>
+            </select>
+
+            <label>Profile Image (Optional)</label>
+            <input type="file" name="profile_image" class="form-control mb-3">
+
+            <button class="btn btn-primary btn-block">Register</button>
+        </form>
+    </div>
+</div>
 
 </body>
 <?php include 'footer.php'; ?>
-
 </html>

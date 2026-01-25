@@ -260,7 +260,7 @@ unset($_SESSION['message_type']);
   <button onclick="window.location.reload();" style="background: none; border: none; cursor: pointer;">
    <i class="fas fa-sync-alt" style="font-size: 24px; color: #000;"></i> Refresh
   </button>
-  <a href="add_user.php" class="btn">Add User</a>
+  <a href="register.php" class="btn">Add User</a>
   <a href="logout.php" class="btn btn-logout">Logout</a>
  </div>
 
