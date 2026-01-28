@@ -1,4 +1,10 @@
+
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+
 // Database connection
 $host = 'localhost';
 $db = 'abc_company';
@@ -16,40 +22,44 @@ function numberToWords($number) {
     return ucfirst($f->format($number));
 }
 
+// Initialize form data
+$formData = [
+    'sales_order_no' => '',
+    'sales_invoice_no' => '',
+    'invoice_date' => date('Y-m-d'),
+    'customer_name' => '',
+    'customer_id' => '',
+    'salesperson_name' => '',
+    'salesperson_id' => '',
+    'payment_method' => '',
+    'total_sales_before_vat' => 0,
+    'vat' => 0,
+    'total_sales_after_vat' => 0,
+    'amount_paid' => 0,
+    'amount_due' => 0,
+    'reference' => ''
+];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Collect and sanitize form data
-    $formData = [
-        'sales_order_no' => $_POST['sales_order_no'] ?? '',
-        'sales_invoice_no' => $_POST['sales_invoice_no'] ?? '',
-        'invoice_date' => $_POST['invoice_date'] ?? '',
-        'customer_name' => $_POST['customer_name'] ?? '',
-        'customer_id' => $_POST['customer_id'] ?? '',
-        'salesperson_name' => $_POST['salesperson_name'] ?? '',
-        'salesperson_id' => $_POST['salesperson_id'] ?? '',
-        'payment_method' => $_POST['payment_method'] ?? '',
-        'total_sales_before_vat' => floatval($_POST['total_sales_before_vat'] ?? 0),
-        'vat' => floatval($_POST['vat'] ?? 0),
-        'total_sales_after_vat' => floatval($_POST['total_sales_after_vat'] ?? 0),
-        'amount_paid' => floatval($_POST['amount_paid'] ?? 0),
-        'amount_due' => floatval($_POST['amount_due'] ?? 0),
-        'reference' => $_POST['reference'] ?? ''
-    ];
+    foreach ($formData as $key => &$value) {
+        if (isset($_POST[$key])) {
+            $value = is_numeric($_POST[$key]) ? floatval($_POST[$key]) : trim($_POST[$key]);
+        }
+    }
+    unset($value);
 
     // Prepare item JSON data
     $itemsData = [];
-
     if (!empty($_POST['item_id']) && is_array($_POST['item_id'])) {
         foreach ($_POST['item_id'] as $index => $itemId) {
             if (!empty($itemId)) {
                 $itemsData[] = [
                     'item_id' => $itemId,
                     'item_description' => $_POST['item_description'][$index] ?? '',
-                    'category' => $_POST['category'][$index] ?? '',
-                    'uom' => $_POST['uom'][$index] ?? '',
-                    'product_id' => $_POST['product_id'][$index] ?? '',
-                    'quantity' => floatval($_POST['quantity'][$index] ?? 0),
-                    'GL_account' => $_POST['GL_account'][$index] ?? '',
+                    'qty' => floatval($_POST['qty'][$index] ?? 0),
                     'unit_price' => floatval($_POST['unit_price'][$index] ?? 0),
+                    'subtotal' => floatval($_POST['qty'][$index] ?? 0) * floatval($_POST['unit_price'][$index] ?? 0)
                 ];
             }
         }
@@ -58,31 +68,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Update inventory quantities
     foreach ($itemsData as $item) {
         $product_id = $item['item_id'];
-        $quantity = $item['quantity'];
+        $qty = $item['qty'];
 
-        $update = $conn->prepare("UPDATE inventory SET quantity = quantity - ? WHERE item_id = ?");
-        if (!$update) {
-            die("❌ Prepare failed (inventory update): " . $conn->error);
-        }
-        // Assuming item_id is a string; change 's' to 'i' if integer
-        $update->bind_param("ds", $quantity, $item_id);
+        $update = $conn->prepare("UPDATE inventory SET qty= qty - ? WHERE item_id = ?");
+        if (!$update) die("❌ Prepare failed (inventory update): " . $conn->error);
+        $update->bind_param("ds", $qty, $product_id); // change 's' to 'i' if item_id is integer
         $update->execute();
         $update->close();
     }
 
     $itemsJson = !empty($itemsData) ? json_encode($itemsData) : json_encode([]);
 
-    // Prepare SQL insert
+    // Insert invoice
     $sql = "INSERT INTO sales (
         sales_order_no, salesperson_id, salesperson_name, reference,
         invoice_no, items, total_sales_before_vat, vat,
-        total_sales_after_vat, amount_paid, amount_due, `date`
+        total_sales_after_vat, amount_paid, amount_due, invoice_date
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        die("❌ Prepare failed: " . $conn->error);
-    }
+    if (!$stmt) die("❌ Prepare failed: " . $conn->error);
 
     $stmt->bind_param(
         "ssssssddddds",
@@ -103,36 +108,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($stmt->execute()) {
         $totalFormatted = number_format($formData['total_sales_after_vat'], 2);
         $inWords = numberToWords($formData['total_sales_after_vat']);
-
-        echo "<div style='
-                padding: 20px;
-                background: #d4edda;
-                color: #155724;
-                font-family: Arial, sans-serif;
-                border: 2px solid #c3e6cb;
-                border-radius: 10px;
-                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-                max-width: 600px;
-                margin: 20px auto;
-                text-align: center;
-                font-size: 18px;
-            '>
-            <h2 style='margin-bottom: 10px;'>✅ Invoice Saved Successfully!</h2>
-            <p><strong>Total Amount:</strong> <span style='font-size: 20px;'>$totalFormatted</span></p>
-            <p><strong>In Words:</strong> <em>$inWords</em></p>
+        echo "<div style='padding:20px;background:#d4edda;color:#155724;border:2px solid #c3e6cb;border-radius:10px;text-align:center;max-width:600px;margin:20px auto;'>
+        <h2>✅ Invoice Saved Successfully!</h2>
+        <p><strong>Total Amount:</strong> $totalFormatted</p>
+        <p><strong>In Words:</strong> <em>$inWords</em></p>
         </div>";
     } else {
-        echo "<div style='
-                padding: 15px;
-                background: #f8d7da;
-                color: #721c24;
-                border: 2px solid #f5c6cb;
-                border-radius: 10px;
-                font-family: Arial, sans-serif;
-                max-width: 600px;
-                margin: 20px auto;
-                text-align: center;
-            '>❌ Error saving invoice: " . $stmt->error . "</div>";
+        echo "<div style='padding:15px;background:#f8d7da;color:#721c24;border:2px solid #f5c6cb;border-radius:10px;text-align:center;max-width:600px;margin:20px auto;'>❌ Error saving invoice: " . $stmt->error . "</div>";
     }
 
     $stmt->close();
@@ -302,8 +284,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
        <div class="col-md-3">
         <label class="form-label">Invoice Date</label>
         <input type="date"
-         class="form-control <?php echo (!empty($error) && empty($formData['date']) ? 'is-invalid' : ''); ?>"
-         name="date" value="<?php echo htmlspecialchars($formData['date'] ?? ''); ?>" required>
+         class="form-control <?php echo (!empty($error) && empty($formData['invoice_date']) ? 'is-invalid' : ''); ?>"
+         name="invoice_date" value="<?php echo htmlspecialchars($formData['invoice_date'] ?? ''); ?>" required>
        </div>
       </div>
 

@@ -34,7 +34,7 @@
         </div>
     </div>
     <div class="footer-bottom">
-        <p>&copy; 2024 ABC Water Company. All rights reserved.</p>
+        <p>&copy; 2024 ABC Water Company. All rights reserved. Designed & Developed by Habtom-ACCA</p>
     </div>
 </footer>
 <style>

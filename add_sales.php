@@ -15,7 +15,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $invoice_no       = $_POST['invoice_no'] ?? '';
     $uom              = $_POST['uom'] ?? '';
     $item_id          = $_POST['item_id'] ?? '';
-    $quantity         = isset($_POST['quantity']) ? intval($_POST['quantity']) : 0;
+    $qty        = isset($_POST['qty']) ? intval($_POST['qty']) : 0;
     $GL_account       = $_POST['GL_account'] ?? '';
     $unit_price       = isset($_POST['unit_price']) ? floatval($_POST['unit_price']) : 0.0;
     $total_sales      = isset($_POST['total_sales']) ? floatval($_POST['total_sales']) : 0.0;
@@ -42,7 +42,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Prepare SQL statement
     $stmt = $conn->prepare("INSERT INTO sales 
         (sales_order_no, salesperson_id, salesperson_name, reference, invoice_no, 
-         item_id, item_description, uom, product_id, quantity, GL_account, 
+         item_id, item_description, uom, product_id, qty, GL_account, 
          unit_price, total_sales, total_profit, date, branch_id, 
          customer_id, customer_name, payment_method, job_id, section)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -54,7 +54,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Bind parameters (corrected types)
     $stmt->bind_param("sisssssssisdddsisssss", 
         $sales_order_no, $salesperson_id, $salesperson_name, $reference, $invoice_no, 
-        $item_id, $item_description, $uom, $product_id, $quantity, $GL_account, 
+        $item_id, $item_description, $uom, $product_id, $qty, $GL_account, 
         $unit_price, $total_sales, $total_profit, $date, $branch_id, 
         $customer_id, $customer_name, $payment_method, $job_id, $section
     );
@@ -255,9 +255,9 @@ body {
       function calculateTotal(input) {
        const row = input.closest("tr");
        const item_id = parseFloat(row.querySelector('[name="item_id[]"]').value) || 0;
-       const quantity = parseFloat(row.querySelector('[name="quantity[]"]').value) || 0;
+       const qty = parseFloat(row.querySelector('[name="qty[]"]').value) || 0;
        const unitPrice = parseFloat(row.querySelector('[name="unit_price[]"]').value) || 0;
-       const totalSales = quantity * unitPrice;
+       const totalSales = qty* unitPrice;
        row.querySelector('[name="total_sales[]"]').value = totalSales.toFixed(2);
        updateSalesSummary();
       }
@@ -270,7 +270,7 @@ body {
                 <td><input type="text" class="form-control" name="item_id[]" required></td>
                 <td><input type="text" class="form-control" name="item_description[]" required></td>
                 <td><input type="text" class="form-control" name="gl_account[]" required></td>
-                <td><input type="number" class="form-control" name="quantity[]" step="1" min="1" oninput="calculateTotal(this)" required></td>
+                <td><input type="number" class="form-control" name="qty[]" step="1" min="1" oninput="calculateTotal(this)" required></td>
                 <td><input type="number" class="form-control" name="unit_price[]" step="0.01" min="0.01" oninput="calculateTotal(this)" required></td>
                 <td><input type="number" class="form-control" name="total_sales[]" readonly></td>
                 <td><input type="text" class="form-control" name="job_id[]"></td>

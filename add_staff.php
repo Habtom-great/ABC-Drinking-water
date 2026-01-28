@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 include 'db_connection.php';
@@ -17,6 +18,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $first_name = $_POST['first_name'] ?? '';
     $middle_name = $_POST['middle_name'] ?? '';
     $last_name = $_POST['last_name'] ?? '';
+    $gender = $_POST['gender'] ?? '';
     $telephone = $_POST['telephone'] ?? '';
     $address = $_POST['address'] ?? '';
     $name = trim("$first_name $middle_name $last_name");
@@ -61,8 +63,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Insert into database if no errors
     if (!$error) {
         $sql = "INSERT INTO staff 
-                (first_name, middle_name, last_name, telephone, address, name, department, position, salary, email, role, hire_date, termination_date, experience, skills, profile_image)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                (first_name, middle_name, last_name, gender, telephone, address, name, department, position, salary, email, role, hire_date, termination_date, experience, skills, profile_image)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $conn->prepare($sql);
         if (!$stmt) {
@@ -70,8 +72,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } else {
             // Fixed bind_param: 16 variables, only 1 double for salary
             $stmt->bind_param(
-                "ssssssssdsssssss",
-                $first_name, $middle_name, $last_name, $telephone, $address, $name,
+                "ssssssssdssssssss",
+                $first_name, $middle_name, $last_name, $gender, $telephone, $address, $name,
                 $department, $position, $salary, $email, $role, $hire_date, $termination_date,
                 $experience, $skills, $profile_image
             );
@@ -141,6 +143,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
   <div class="mb-3"><label>First Name</label><input type="text" name="first_name" class="form-control" value="<?= $_POST['first_name'] ?? '' ?>" required></div>
   <div class="mb-3"><label>Middle Name</label><input type="text" name="middle_name" class="form-control" value="<?= $_POST['middle_name'] ?? '' ?>" required></div>
   <div class="mb-3"><label>Last Name</label><input type="text" name="last_name" class="form-control" value="<?= $_POST['last_name'] ?? '' ?>" required></div>
+  <div class="mb-3"><label>Gender</label>
+   <select name="gender" class="form-control" required>
+    <option value="male" <?= ($_POST['gender'] ?? '') == 'male' ? 'selected' : '' ?>>Male</option>
+    <option value="female" <?= ($_POST['gender'] ?? '') == 'female' ? 'selected' : '' ?>>Female</option>
+   </select>
+  </div>
+
   <div class="mb-3"><label>Department</label><input type="text" name="department" class="form-control" value="<?= $_POST['department'] ?? '' ?>" required></div>
   <div class="mb-3"><label>Position</label><input type="text" name="position" class="form-control" value="<?= $_POST['position'] ?? '' ?>" required></div>
   <div class="mb-3"><label>Salary</label><input type="number" name="salary" class="form-control" value="<?= $_POST['salary'] ?? '' ?>" required></div>

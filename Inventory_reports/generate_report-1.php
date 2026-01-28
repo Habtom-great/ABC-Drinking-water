@@ -46,11 +46,11 @@ if ($report_type) {
             $title = "Vendors Report";
             break;
         case 'inventory':
-            $sql = "SELECT item_id, invoice_no, date, item_description, category, quantity, unit_cost, unit_price, total_purchased_before_vat, vat, total_purchased_after_vat FROM inventory ORDER BY date DESC LIMIT $start_from, $records_per_page";
+            $sql = "SELECT item_id, invoice_no, invoice_date, description, qty, unit_price, total_before_vat, vat, total_after_vat FROM inventory ORDER BY invoice_date DESC LIMIT $start_from, $records_per_page";
             $title = "Inventory Report";
             break;
         case 'purchases':
-            $sql = "SELECT item_id, item_description, category, quantity, unit_cost, unit_price, total_purchased_before_vat, vat, total_purchased_after_vat, date FROM inventory ORDER BY date DESC LIMIT $start_from, $records_per_page";
+            $sql = "SELECT item_id, item_description, category, quantity, unit_cost, unit_price, total_purchased_before_vat, vat, total_purchased_after_vat, invoice_date FROM inventory ORDER BY invoice_date DESC LIMIT $start_from, $records_per_page";
             $title = "Purchase Report";
             break;
         case 'sales':

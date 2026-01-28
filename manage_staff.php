@@ -223,6 +223,17 @@ $defaultImage = "uploads/staff/profile_images/Habt.jpg";
   <div class="staff-table-container">
    <h2 class="text-center"><i class="fas fa-users me-1"></i>Staff Members</h2>
 
+   <?php if (isset($_SESSION['message'])): ?>
+    <div class="alert alert-<?php echo $_SESSION['message_type'] === 'success' ? 'success' : 'danger'; ?> alert-dismissible fade show text-center" role="alert">
+        <?php echo $_SESSION['message']; ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php
+    unset($_SESSION['message']);
+    unset($_SESSION['message_type']);
+endif;
+?>
+
    <div class="table-responsive">
     <table class="table table-hover align-middle">
      <thead>

@@ -6,8 +6,6 @@ error_reporting(E_ALL);
 session_start();
 require_once 'db.php';
 
-
-
 // Authentication check
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
@@ -20,16 +18,16 @@ if (!isset($_SESSION['csrf_token'])) {
 }
 
 // Handle form submission
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    // Optional: check CSRF token
+    // CSRF token check
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
         die("Invalid CSRF token");
     }
 
     // Sanitize input
-    $purchase_order_no = $_POST['purchase_order_no'] ?? '';
-    $purchase_invoice_no = $_POST['purchase_invoice_no'] ?? '';
+    $order_no = $_POST['purchase_order_no'] ?? '';
+    $invoice_no = $_POST['purchase_invoice_no'] ?? '';
     $reference = $_POST['reference'] ?? '';
     $invoice_date = $_POST['invoice_date'] ?? '';
     $vendor_id = $_POST['vendor_id'] ?? '';
@@ -37,71 +35,84 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $vendor_name = $_POST['vendor_name'] ?? '';
     $vendor_tin_no = $_POST['vendor_tin_no'] ?? '';
     $vendor_phone = $_POST['vendor_phone'] ?? '';
-    $purchase_person_id = $_POST['purchase_person_id'] ?? '';
-    $purchase_person_name = $_POST['purchase_person_name'] ?? '';
+    $purchaser_id = $_POST['purchase_person_id'] ?? '';
+    $purchaser_name = $_POST['purchase_person_name'] ?? '';
     $payment_method = $_POST['payment_method'] ?? '';
+    $created_by = $_SESSION['user_id'];
 
     // Items arrays
     $item_ids = $_POST['item_id'] ?? [];
     $descriptions = $_POST['description'] ?? [];
+    $uoms = $_POST['uom'] ?? [];
     $qtys = $_POST['qty'] ?? [];
     $unit_prices = $_POST['unit_price'] ?? [];
-
-    // Prepare SQL statement
-    $stmt = $conn->prepare("INSERT INTO purchase_invoices
-        (purchase_order_no, purchase_invoice_no, reference, invoice_date,
-        vendor_id, vendor_company_name, vendor_name, vendor_tin_no, vendor_phone,
-        purchase_person_id, purchase_person_name, payment_method,
-        total_before_vat, vat, grand_total, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
-
-    if (!$stmt) {
-        die("Prepare failed: (" . $conn->errno . ") " . $conn->error);
-    }
 
     // Calculate totals
     $total_before_vat = 0;
     for ($i = 0; $i < count($qtys); $i++) {
         $total_before_vat += (float)$qtys[$i] * (float)$unit_prices[$i];
     }
-
     $vat = $total_before_vat * 0.15; // 15% VAT
-    $grand_total = $total_before_vat + $vat;
+    $total_after_vat = $total_before_vat + $vat;
 
-    $created_by = $_SESSION['user_id'];
+    // Start transaction
+    $conn->begin_transaction();
 
-    // Bind parameters and execute
-    // Variables passed: 16
-$stmt->bind_param(
-    "ssssssssssssdddi",
-    $purchase_order_no,       // s
-    $purchase_invoice_no,     // s
-    $reference,               // s
-    $invoice_date,            // s
-    $vendor_id,               // s
-    $vendor_company_name,     // s
-    $vendor_name,             // s
-    $vendor_tin_no,           // s
-    $vendor_phone,            // s
-    $purchase_person_id,      // s
-    $purchase_person_name,    // s
-    $payment_method,          // s
-    $total_before_vat,        // d
-    $vat,                     // d
-    $grand_total,             // d
-    $created_by               // i
-);
+    try {
+        // Prepare SQL statement
+        $stmt = $conn->prepare("INSERT INTO inventory
+            (order_no, invoice_no, reference, invoice_date,
+            vendor_id, vendor_company_name, vendor_name, vendor_tin_no, vendor_telephone,
+            purchaser_id, purchaser_name, payment_method,
+            total_before_vat, vat, total_after_vat, created_by, created_at,
+            item_id, description, uom, qty, unit_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)");
 
-    if ($stmt->execute()) {
+        if (!$stmt) {
+            throw new Exception("Prepare failed: " . $conn->error);
+        }
+
+        // Loop through each item and insert
+        for ($i = 0; $i < count($item_ids); $i++) {
+            $stmt->bind_param(
+                "ssssssssssssdddisssdd",
+                $order_no,
+                $invoice_no,
+                $reference,
+                $invoice_date,
+                $vendor_id,
+                $vendor_company_name,
+                $vendor_name,
+                $vendor_tin_no,
+                $vendor_phone,
+                $purchaser_id,
+                $purchaser_name,
+                $payment_method,
+                $total_before_vat,
+                $vat,
+                $total_after_vat,
+                $created_by,
+                $item_ids[$i],
+                $descriptions[$i],
+                $uoms[$i],
+                $qtys[$i],
+                $unit_prices[$i]
+            );
+            $stmt->execute();
+        }
+
+        $conn->commit();
         $_SESSION['success'] = "Invoice saved successfully!";
-    } else {
-        $_SESSION['error'] = "Error saving invoice: " . $stmt->error;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $_SESSION['error'] = "Error saving invoice: " . $e->getMessage();
     }
 
     header("Location: add_inventory.php");
     exit();
 }
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
@@ -146,7 +157,7 @@ $stmt->bind_param(
 
  .form-control,
  .form-select {
-  font-size: 13px;
+  font-size: 12px;
   padding: 6px 10px;
  }
 
@@ -159,6 +170,22 @@ $stmt->bind_param(
   width: 100%;
   font-size: 13px;
  }
+
+    /* Set UOM column width only */
+    th.uom-column, td.uom-column {
+        width: 95px; /* adjust this value as needed */
+    }
+
+    table {
+        border-collapse: collapse;
+        width: 100%;
+    }
+
+    table th, table td {
+        border: 1px solid #ddd;
+        padding: 12px;
+        text-align: left;
+    }
  </style>
 </head>
 
@@ -182,13 +209,15 @@ $stmt->bind_param(
    <div class="alert alert-danger"><?= $_SESSION['error']; unset($_SESSION['error']); ?></div>
    <?php endif; ?>
 
+<!--<button type="reset" class="btn btn-danger" onclick="clearForm()">🗑️ Clear Data</button>
+ <button type="submit" name="save_invoice" class="btn btn-success">💾 Save Invoice</button>-->
    <!-- Action Buttons -->
    <div class="d-flex flex-wrap gap-2 mb-3">
     <button type="button" class="btn btn-info text-white" onclick="showInvoiceLists()">📂 Show Invoice Lists</button>
-    <button type="reset" class="btn btn-danger" onclick="clearForm()">🗑️ Clear Data</button>
+    
     <button type="button" class="btn btn-secondary no-print" onclick="printFullInvoice()">🖨️ Print</button>
     <button type="button" onclick="window.location.href='manage_inventory.php'" class="btn btn-danger">Close</button>
-    <button type="submit" name="save_invoice" class="btn btn-success">💾 Save Invoice</button>
+   
    </div>
 
    <!-- Invoice Form Container -->
@@ -222,10 +251,8 @@ $stmt->bind_param(
      <div class="row g-2 mb-2">
       <div class="col-md-3"><input type="text" name="vendor_phone" class="form-control" placeholder="Phone" required>
       </div>
-      <div class="col-md-3"><input type="text" name="purchase_person_id" class="form-control" placeholder="Purchaser ID"
-        required></div>
-      <div class="col-md-3"><input type="text" name="purchase_person_name" class="form-control"
-        placeholder="Purchaser Name" required></div>
+      <div class="col-md-3"><input type="text" name="purchaser_id" class="form-control" placeholder="Purchaser ID" required></div>
+      <div class="col-md-3"><input type="text" name="purchaser_name" class="form-control" placeholder="Purchaser Name" required></div>
       <div class="col-md-3">
        <select class="form-select" name="payment_method" required>
         <option value="">Payment Method</option>
@@ -241,10 +268,13 @@ $stmt->bind_param(
      <table class="table table-bordered table-sm" id="itemTable">
       <thead class="table-light">
        <tr>
-        <th>Item ID</th>
+         <th class="uom-column">Item ID</th>
         <th>Description</th>
-        <th>Qty</th>
-        <th>Unit Price</th>
+         <th class="uom-column">UOM</th>
+          <th class="uom-column">Qty</th>
+      
+         <th class="uom-column">Unit Price</th>
+       
         <th>Subtotal</th>
         <th><button type="button" class="btn btn-sm btn-success" onclick="addRow()">+</button></th>
        </tr>
@@ -253,6 +283,7 @@ $stmt->bind_param(
        <tr>
         <td><input type="text" name="item_id[]" class="form-control form-control-sm" required></td>
         <td><input type="text" name="description[]" class="form-control form-control-sm" required></td>
+         <td><input type="text" name="uom[]" class="form-control form-control-sm" required></td>
         <td><input type="number" name="qty[]" class="form-control form-control-sm qty" oninput="updateTotals()"
           required></td>
         <td><input type="number" name="unit_price[]" class="form-control form-control-sm unit-price"

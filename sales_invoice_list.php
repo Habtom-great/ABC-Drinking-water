@@ -2,9 +2,19 @@
 include('db.php');
 
 // Allowed columns for sorting
-$allowed_sort = ['invoice_no', 'date', 'item_id', 'customer_name', 'total_sales_before_vat'];
-$sort_key = $_GET['sort'] ?? 'invoice_no'; // Default to 'invoice_no'
-$order_by = in_array($sort_key, $allowed_sort) ? $sort_key : 'invoice_no'; // Ensure only allowed columns are used
+$allowed_sort = [
+    'invoice_no' => 'sales.invoice_no',
+    'invoice_date' => 'sales.invoice_date',
+    'item_id' => 'inventory.item_id',
+    'customer_name' => 'sales.customer_name',
+    'salesperson_name' => 'sales.salesperson_name',
+    'payment_method' => 'sales.payment_method',
+    'total_sales_before_vat' => 'sales.total_sales_before_vat'
+];
+
+// Determine sort key
+$sort_key = $_GET['sort'] ?? 'invoice_no';
+$order_by = $allowed_sort[$sort_key] ?? 'sales.invoice_no';
 
 // Handle deletion
 if (isset($_GET['invoice_no'])) {
@@ -19,18 +29,34 @@ if (isset($_GET['invoice_no'])) {
     }
 }
 
-// Fetch sales invoices
-$sql = "SELECT sales.*, inventory.item_description, inventory.item_id 
+// Optional search
+$search = $_GET['search'] ?? '';
+$search_sql = '';
+$params = [];
+$types = '';
+
+if ($search) {
+    $search_sql = "WHERE sales.invoice_no LIKE ? OR sales.customer_name LIKE ? OR sales.invoice_date LIKE ?";
+    $params = ["%$search%", "%$search%", "%$search%"];
+    $types = "sss";
+}
+
+// Fetch sales invoices with inventory
+$sql = "SELECT sales.*, inventory.item_id, inventory.description 
         FROM sales
         LEFT JOIN inventory ON sales.item_id = inventory.item_id
+        $search_sql
         ORDER BY $order_by DESC";
 
-$result = $conn->query($sql);
-if (!$result) {
-    die("Query failed: " . $conn->error);
+$stmt = $conn->prepare($sql);
+if ($search && $stmt) {
+    $stmt->bind_param($types, ...$params);
 }
+$stmt->execute();
+$result = $stmt->get_result();
 $total_invoices = $result->num_rows;
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">

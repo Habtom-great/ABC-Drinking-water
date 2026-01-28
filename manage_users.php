@@ -1,3 +1,6 @@
+<pre><?php print_r($_SESSION); ?></pre>
+
+
 <?php  
 session_start();
 include 'db_connection.php';
@@ -96,7 +99,7 @@ unset($_SESSION['message_type']);
  }
 
  .user-table {
-  width: 71.9%;
+  width: 72.15%;
   margin: auto;
   border-radius: 10px;
   overflow: hidden;
@@ -236,31 +239,41 @@ unset($_SESSION['message_type']);
 <body>
 
  <!-- Header -->
- <div class="header">
-  Manage Users - Admin Panel
- </div>
+<!-- Header -->
+<div class="header">
+    Manage Users - Admin Panel
+</div>
 
- <head>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
- </head>
- <!-- Create the Refresh Icon and Add Functionality:-->
+<!-- Centered Alert Message -->
+<?php session_start(); ?>
+<?php if (isset($_SESSION['message'])): ?>
+<div class="d-flex justify-content-center mt-4">
+    <div class="alert alert-<?php echo $_SESSION['message_type']; ?> text-center shadow"
+         role="alert"
+         style="
+            max-width: 600px;
+            width: 100%;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 10px;
+            border-left: 6px solid <?php echo $_SESSION['message_type'] === 'success' ? '#28a745' : '#dc3545'; ?>;
+         ">
+        <?php echo htmlspecialchars($_SESSION['message']); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+</div>
+<?php
+unset($_SESSION['message']);
+unset($_SESSION['message_type']);
+endif;
+?>
 
-
- <!-- Display the delete message if available -->
- <?php if (!empty($message)): ?>
- <div class="alert alert-<?php echo $message_type; ?>   alert-dismissible fade show " role="alert"
-  style="font-size: 16px; font-weight: bold; color:#dc3545">
-
-  <?php echo $message; ?>
-  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
- </div>
- <?php endif; ?>
  <!-- Navbar -->
  <div class="navbar">
   <button onclick="window.location.reload();" style="background: none; border: none; cursor: pointer;">
    <i class="fas fa-sync-alt" style="font-size: 24px; color: #000;"></i> Refresh
   </button>
-  <a href="register.php" class="btn">Add User</a>
+  <a href="add_user.php" class="btn">Add User</a>
   <a href="logout.php" class="btn btn-logout">Logout</a>
  </div>
 
@@ -285,6 +298,8 @@ unset($_SESSION['message_type']);
       <th><a
         href="?sort=first_name&order=<?php echo ($sort_column == 'first_name' && $sort_order == 'ASC') ? 'desc' : 'asc'; ?>">First
         Name</a></th>
+        <th><a
+        href="?sort=gender&order=<?php echo ($sort_column == 'gender' && $sort_order == 'ASC') ? 'desc' : 'asc'; ?>">Gender</a></th>
       <th><a
         href="?sort=email&order=<?php echo ($sort_column == 'email' && $sort_order == 'ASC') ? 'desc' : 'asc'; ?>">Email</a>
       </th>
@@ -307,6 +322,7 @@ unset($_SESSION['message_type']);
       <td><?php echo $user['last_name']; ?></td>
       <td><?php echo $user['middle_name']; ?></td>
       <td><?php echo $user['first_name']; ?></td>
+      <td><?php echo $user['gender']; ?></td>
       <td><?php echo $user['email']; ?></td>
       <td><?php echo $user['telephone']; ?></td>
       <td><?php echo $user['address']; ?></td>

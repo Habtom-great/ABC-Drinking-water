@@ -1,3 +1,5 @@
+
+
 <?php
 include('db.php');
 session_start();
@@ -20,19 +22,19 @@ $params = [];
 $types = '';
 
 // Sorting configuration
-$allowed_sort = ['invoice_no', 'invoice_date', 'item_id', 'item_description', 'total_purchased_after_vat'];
+$allowed_sort = ['invoice_no', 'invoice_date', 'vendor_name', 'total_after_vat'];
 $sort = isset($_GET['sort']) && in_array($_GET['sort'], $allowed_sort) ? $_GET['sort'] : 'invoice_no';
 $order = isset($_GET['order']) && strtoupper($_GET['order']) === 'ASC' ? 'ASC' : 'DESC';
 
-// Search
+// Search filter
 if (isset($_GET['search']) && !empty(trim($_GET['search']))) {
     $search = trim($_GET['search']);
-    $where[] = "(invoice_no LIKE ? OR item_description LIKE ? OR item_id LIKE ? OR reference LIKE ?)";
+    $where[] = "(invoice_no LIKE ? OR vendor_name LIKE ? OR purchase_id LIKE ? OR reference LIKE ?)";
     $params = array_merge($params, ["%$search%", "%$search%", "%$search%", "%$search%"]);
     $types .= 'ssss';
 }
 
-// Date filtering
+// Date filter
 if (isset($_GET['start_date']) && !empty($_GET['start_date'])) {
     $start_date = $_GET['start_date'];
     $end_date = isset($_GET['end_date']) && !empty($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
@@ -67,12 +69,12 @@ $stmt->bind_param($types_page, ...$params_page);
 $stmt->execute();
 $result = $stmt->get_result();
 
-// Summary
+// Summary totals
 $summary_sql = "SELECT 
-    COALESCE(SUM(quantity),0) as total_quantity,
-    COALESCE(SUM(total_purchased_before_vat),0) as total_before_vat,
+    COALESCE(SUM(total_before_vat),0) as total_before_vat,
     COALESCE(SUM(vat),0) as total_vat,
-    COALESCE(SUM(total_purchased_after_vat),0) as grand_total
+    COALESCE(SUM(total_after_vat),0) as grand_total_including_Vat,
+    COALESCE(SUM(qty),0) as total_quantity
     FROM inventory $where_clause";
 $summary_stmt = $conn->prepare($summary_sql);
 if (!empty($where)) {
@@ -80,7 +82,14 @@ if (!empty($where)) {
 }
 $summary_stmt->execute();
 $summary = $summary_stmt->get_result()->fetch_assoc();
-?>
+
+if(isset($_SESSION['success'])): ?>
+<div class="alert alert-success"><?= $_SESSION['success']; unset($_SESSION['success']); ?></div>
+<?php endif; ?>
+
+<?php if(isset($_SESSION['error'])): ?>
+<div class="alert alert-danger"><?= $_SESSION['error']; unset($_SESSION['error']); ?></div>
+<?php endif; ?>
 
 <!DOCTYPE html>
 <html lang="en">
@@ -112,6 +121,7 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
  <p>Total records: <?= number_format($total_records) ?></p>
 </div>
 
+
 <!-- Summary -->
 <div class="row mb-4 text-center">
  <div class="col-md-3"><div class="card"><div class="card-body">
@@ -124,7 +134,7 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
   <h6>Total VAT</h6><p><?= number_format($summary['total_vat'],2) ?></p>
  </div></div></div>
  <div class="col-md-3"><div class="card"><div class="card-body">
-  <h6>Grand Total</h6><p><?= number_format($summary['grand_total'],2) ?></p>
+  <h6>Grand Total Including Vat</h6><p><?= number_format($summary['grand_total_including_Vat'],2) ?></p>
  </div></div></div>
 </div>
 
@@ -138,7 +148,17 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
   <button class="btn btn-primary">Apply Filters</button>
   <a href="invoice_lists.php" class="btn btn-outline-secondary">Reset</a>
   <a href="add_inventory.php" class="btn btn-success"><i class="bi bi-plus-circle"></i> New Invoice</a>
- </div>
+<!-- Export to Excel -->
+    <a href="export_all_invoices_excel.php?invoice_no=<?= urlencode($row['invoice_no']) ?>" 
+       class="btn btn-sm btn-success" title="Export to Excel">📄 Excel</a>
+ <!-- Export to PDF 
+  
+     <a href="export_all_invoices_pdf.php?invoice_no=<?= urlencode($row['invoice_no']) ?>" 
+       class="btn btn-sm btn-success" title="Export to Excel"> 📄 PDF</a>-->
+  <!-- Back to dashboard -->
+<a href="admin_dashboard.php?invoice_no=<?= urlencode($row['invoice_no']) ?>" 
+       class="btn btn-sm btn-success" title="Back to dashboard">📄 Back to dashboard</a>
+</div>
 </form>
 </div></div>
 
@@ -151,12 +171,14 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
   <th onclick="sortTable('invoice_date')">Date <?= $sort==='invoice_date'?($order==='ASC'? '↑':'↓'):'' ?></th>
   <th>Reference</th>
   <th>Item ID</th>
+  
   <th>Description</th>
+  <th class="uom-column">UOM</th>
   <th class="numeric-cell">Qty</th>
   <th class="numeric-cell">Unit Cost</th>
-  <th class="numeric-cell">Subtotal</th>
+  <th class="numeric-cell">total Before Vat</th>
   <th class="numeric-cell">VAT</th>
-  <th class="numeric-cell">Total</th>
+  <th class="numeric-cell">Total + Vat</th>
   <th class="action-cell">Actions</th>
  </tr>
  </thead>
@@ -168,18 +190,30 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
   <td><?= date('d/m/Y', strtotime($row['invoice_date'])) ?></td>
   <td><?= htmlspecialchars($row['reference']) ?></td>
   <td><?= htmlspecialchars($row['item_id']) ?></td>
-  <td><?= htmlspecialchars($row['item_description']) ?></td>
-  <td class="numeric-cell"><?= number_format($row['quantity']) ?></td>
-  <td class="numeric-cell"><?= number_format($row['unit_cost'],2) ?></td>
-  <td class="numeric-cell"><?= number_format($row['total_purchased_before_vat'],2) ?></td>
+  
+  <td><?= htmlspecialchars($row['description']) ?></td>
+  <td><?= htmlspecialchars($row['uom']) ?></td>
+  <td class="numeric-cell"><?= number_format($row['qty']) ?></td>
+  <td class="numeric-cell"><?= number_format($row['unit_price'],2) ?></td>
+  <td class="numeric-cell"><?= number_format($row['total_before_vat'],2) ?></td>
   <td class="numeric-cell"><?= number_format($row['vat'],2) ?></td>
-  <td class="numeric-cell"><?= number_format($row['total_purchased_after_vat'],2) ?></td>
+  <td class="numeric-cell"><?= number_format($row['total_after_vat'],2) ?></td>
   <td class="action-cell">
    <div class="btn-group btn-group-sm">
-    <a href="invoice.php?invoice_no=<?= urlencode($row['invoice_no']) ?>" class="btn btn-success" title="Print"><i class="bi bi-printer"></i></a>
-    <a href="add_inventory.php?invoice_no=<?= urlencode($row['invoice_no']) ?>&edit=1" class="btn btn-warning" title="Edit"><i class="bi bi-pencil"></i></a>
-    <a href="delete_invoice.php?invoice_no=<?= urlencode($row['invoice_no']) ?>&csrf_token=<?= $_SESSION['csrf_token'] ?>" class="btn btn-danger" title="Delete" onclick="return confirm('Are you sure you want to delete this invoice?');"><i class="bi bi-trash"></i></a>
-   </div>
+     <!-- Print Invoice -->
+   <a href="invoice.php?invoice_no=<?= urlencode($row['invoice_no']) ?>" class="btn btn-success" title="Print"><i class="bi bi-printer"></i></a>
+    <!-- Edit Invoice -->
+    <a href="edit_invoice.php?invoice_no=<?= urlencode($row['invoice_no']) ?>&edit=1" class="btn btn-warning" title="Edit"><i class="bi bi-pencil"></i></a>
+    <!-- Delete Invoice -->
+    <a href="delete_invoice.php?invoice_no=<?= urlencode($row['invoice_no']) ?>&csrf_token=<?= $_SESSION['csrf_token'] ?>" class="btn btn-danger" title="Delete" 
+    onclick="return confirm('Are you sure you want to delete this invoice?');"><i class="bi bi-trash"></i></a>
+   
+
+   
+
+</div>
+
+
   </td>
  </tr>
  <?php endwhile; ?>
@@ -189,6 +223,7 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
  </tbody>
 </table>
 </div>
+
 
 <!-- Pagination -->
 <?php if($total_pages>1): ?>
@@ -203,7 +238,8 @@ body { background-color: var(--light-bg); font-family: 'Segoe UI', sans-serif; c
 </nav>
 <?php endif; ?>
 
-</div>
+</div> 
+
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
